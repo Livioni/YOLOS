@@ -47,8 +47,8 @@ class Detector(nn.Module):
         
         self.backbone.finetune_det(det_token_num=det_token_num, img_size=init_pe_size, mid_pe_size=mid_pe_size, use_checkpoint=use_checkpoint)
         
-        self.class_embed = MLP(hidden_dim, hidden_dim, num_classes + 1, 3)
-        self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
+        self.class_embed = MLP(hidden_dim, hidden_dim, num_classes + 1, 3) #输出为91维向量
+        self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3) #输出为4维向量
     
     def forward(self, samples: NestedTensor):
         # import pdb;pdb.set_trace()
@@ -292,13 +292,13 @@ def build(args):
 
     # import pdb;pdb.set_trace()
     model = Detector(
-        num_classes=num_classes,
-        pre_trained=args.pre_trained,
-        det_token_num=args.det_token_num,
-        backbone_name=args.backbone_name,
-        init_pe_size=args.init_pe_size,
-        mid_pe_size=args.mid_pe_size,
-        use_checkpoint=args.use_checkpoint,
+        num_classes=num_classes, #类别数91
+        pre_trained=args.pre_trained, #pre_train模型pth文件
+        det_token_num=args.det_token_num, #100个det token
+        backbone_name=args.backbone_name, #vit backbone的型号
+        init_pe_size=args.init_pe_size, #初始化position embedding大小
+        mid_pe_size=args.mid_pe_size, #mid position embedding 大小
+        use_checkpoint=args.use_checkpoint, #是否使用checkpoint
 
     )
     matcher = build_matcher(args)

@@ -81,7 +81,7 @@ class Block(nn.Module):
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
     """
-    def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768):
+    def __init__(self, img_size=[512,864], patch_size=16, in_chans=3, embed_dim=384):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
@@ -97,8 +97,8 @@ class PatchEmbed(nn.Module):
         # FIXME look at relaxing size constraints
         # assert H == self.img_size[0] and W == self.img_size[1], \
         #     f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
+        embeddings = self.proj(x).flatten(2).transpose(1, 2)
+        return embeddings
 
 
 class HybridEmbed(nn.Module):
@@ -415,7 +415,7 @@ def tiny(pretrained=None, **kwargs):
 def small(pretrained=None, **kwargs):
     model = VisionTransformer(
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        norm_layer=partial(nn.LayerNorm, eps=1e-12), **kwargs)
     if pretrained:
         # checkpoint = torch.load('deit_small_patch16_224-cd65a155.pth', map_location="cpu")
         # checkpoint = torch.hub.load_state_dict_from_url(
@@ -452,3 +452,8 @@ def base(pretrained=None, **kwargs):
         checkpoint = torch.load(pretrained, map_location="cpu")
         model.load_state_dict(checkpoint["model"], strict=False)
     return model, 768
+
+if __name__ == '__main__':
+    backbone, hidden_dim = tiny(pretrained="deit_tiny_patch16_224-a1311bcf.pth")
+    backbone.finetune_det(det_token_num=100, img_size=[800, 1344], mid_pe_size=[800, 1344], use_checkpoint=True)
+    

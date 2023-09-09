@@ -5,20 +5,50 @@ import json
 import random
 import time
 from pathlib import Path
+from PIL import Image
+import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
+import torchvision.transforms as transforms
 
 import datasets
 import util.misc as utils
 from datasets import build_dataset, get_coco_api_from_dataset
-from engine import evaluate, train_one_epoch
+from engine import evaluate, train_one_epoch, inference
 
 from models import build_model as build_yolos_model
+from models.detector import Detector,PostProcess
 
 from util.scheduler import create_scheduler
+from util.plot_utils import draw_boxes
 
+# COCO classes
+CLASSES = [
+    'N/A', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
+    'train', 'truck', 'boat', 'traffic light', 'fire hydrant', 'N/A',
+    'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse',
+    'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'N/A', 'backpack',
+    'umbrella', 'N/A', 'N/A', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis',
+    'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove',
+    'skateboard', 'surfboard', 'tennis racket', 'bottle', 'N/A', 'wine glass',
+    'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich',
+    'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
+    'chair', 'couch', 'potted plant', 'bed', 'N/A', 'dining table', 'N/A',
+    'N/A', 'toilet', 'N/A', 'tv', 'laptop', 'mouse', 'remote', 'keyboard',
+    'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'N/A',
+    'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier',
+    'toothbrush'
+]
+
+# colors for visualization
+COLORS = [[0.000, 0.447, 0.741], [0.850, 0.325, 0.098], [0.929, 0.694, 0.125],
+          [0.494, 0.184, 0.556], [0.466, 0.674, 0.188], [0.301, 0.745, 0.933]]
+
+# evaluation
+#python -m torch.distributed.launch --nproc_per_node=8 --use_env main.py --coco_path /path/to/coco 
+# \--batch_size 2 --backbone_name tiny --eval --eval_size 512 --init_pe_size 800 1333 --resume /path/to/YOLOS-Ti
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set YOLOS', add_help=False)
@@ -98,7 +128,10 @@ def get_args_parser():
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
+    parser.add_argument('--infer',default=False, type=bool)
     parser.add_argument('--num_workers', default=2, type=int)
+
+    parser.add_argument('--input_path',default='/home/livion/Documents/github/fork/YOLOS/cat.JPG',type=str)
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
@@ -106,6 +139,23 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     return parser
 
+
+def plot_results(pil_img, prob, boxes, output_dir,im_name):
+    plt.figure(figsize=(16,10))
+    plt.imshow(pil_img)
+    ax = plt.gca()
+    colors = COLORS * 100
+    for i in range(len(prob)):
+        p = prob[i]
+        (xmin, ymin, xmax, ymax) = boxes[i].cpu()
+        c = colors[1]
+        ax.add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
+                                   fill=False, color=c, linewidth=3))
+        ax.text(xmin, ymin, CLASSES[1], bbox=dict(facecolor='red', alpha=0.5))
+
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig(output_dir+im_name)
 
 def main(args):
     utils.init_distributed_mode(args)
@@ -116,10 +166,43 @@ def main(args):
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
-    seed = args.seed + utils.get_rank()
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+    # seed = args.seed + utils.get_rank()
+    # torch.manual_seed(seed)
+    # np.random.seed(seed)
+    # random.seed(seed)
+
+    model = Detector(
+        num_classes=91, #类别数91
+        pre_trained=args.pre_trained, #pre_train模型pth文件
+        det_token_num=args.det_token_num, #100个det token
+        backbone_name=args.backbone_name, #vit backbone的型号
+        init_pe_size=args.init_pe_size, #初始化position embedding大小
+        mid_pe_size=args.mid_pe_size, #mid position embedding 大小
+        use_checkpoint=args.use_checkpoint, #是否使用checkpoint
+    )
+    model.to(device)
+    # model.eval()
+    postprocessors = {'bbox': PostProcess()}
+
+    if args.infer:
+        img = Image.open(args.input_path)
+        orig_target_sizes = torch.tensor([img.size], dtype=torch.float).to(device)
+        # img = Image.open(requests.get(url, stream=True).raw)
+        transform = transforms.Compose([
+                    transforms.Resize(425),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                ])
+        input_tensor = transform(img).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
+        outputs = inference(model, input_tensor,args.device)
+        results = postprocessors['bbox'](outputs, orig_target_sizes)
+        if args.output_dir != '':
+            draw_boxes(img, args.input_path, results, model)
+
+        return    
+
+
+
     # import pdb;pdb.set_trace()
     model, criterion, postprocessors = build_yolos_model(args)
     # model, criterion, postprocessors = build_model(args)
@@ -131,6 +214,8 @@ def main(args):
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
+
+
 
     def build_optimizer(model, args):
         if hasattr(model.backbone, 'no_weight_decay'):

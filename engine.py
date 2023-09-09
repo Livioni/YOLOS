@@ -139,7 +139,6 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     coco_evaluator = CocoEvaluator(base_ds, iou_types)
     # coco_evaluator.coco_eval[iou_types[0]].params.iouThrs = [0, 0.1, 0.5, 0.75]
 
-
     for samples, targets in metric_logger.log_every(data_loader, 256, header):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
@@ -191,3 +190,12 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
         stats['PQ_th'] = panoptic_res["Things"]
         stats['PQ_st'] = panoptic_res["Stuff"]
     return stats, coco_evaluator
+
+
+@torch.no_grad()
+def inference(model, input_tensor, device):
+    # model.eval()
+    input_tensor = input_tensor.to(device)
+    outputs = model(input_tensor)
+    return outputs
+
