@@ -134,9 +134,11 @@ font = ImageFont.truetype("Times New Roman.ttf", font_size)
 
 def draw_boxes(image,img_path,results,model):
     for score, label, box in zip(results[0]["scores"], results[0]["labels"], results[0]["boxes"]):
+        if score < 0.9:
+            continue
         box = [round(i, 2) for i in box.tolist()]
         draw = ImageDraw.Draw(image)
         draw.rectangle(box, outline="red", width=3)
         draw.text((box[0], box[1]), CLASSES[label.item()], fill="red",font=font)
         #save image
-        image.save('results/'+img_path,quality=60)
+        image.save('results/'+'result.png',quality=60)

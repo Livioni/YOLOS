@@ -16,13 +16,13 @@ import torchvision.transforms as transforms
 import datasets
 import util.misc as utils
 from datasets import build_dataset, get_coco_api_from_dataset
+from util.misc import nested_tensor_from_tensor_list
 from engine import evaluate, train_one_epoch, inference
 
 from models import build_model as build_yolos_model
 from models.detector import Detector,PostProcess
 
 from util.scheduler import create_scheduler
-from util.plot_utils import draw_boxes
 
 # COCO classes
 CLASSES = [
@@ -139,37 +139,49 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://', help='url used to set up distributed training')
     return parser
 
+def box_cxcywh_to_xyxy(x):
+    x_c, y_c, w, h = x.unbind(1)
+    b = [(x_c - 0.5 * w), (y_c - 0.5 * h),
+         (x_c + 0.5 * w), (y_c + 0.5 * h)]
+    return torch.stack(b, dim=1)
 
-def plot_results(pil_img, prob, boxes, output_dir,im_name):
+def rescale_bboxes(out_bbox, size):
+    img_w, img_h = size
+    b = box_cxcywh_to_xyxy(out_bbox).to('cpu')
+    b = b * torch.tensor([img_w, img_h, img_w, img_h], dtype=torch.float32)
+    return b
+
+def plot_results(pil_img, prob, boxes):
     plt.figure(figsize=(16,10))
     plt.imshow(pil_img)
     ax = plt.gca()
     colors = COLORS * 100
-    for i in range(len(prob)):
-        p = prob[i]
-        (xmin, ymin, xmax, ymax) = boxes[i].cpu()
-        c = colors[1]
+    for p, (xmin, ymin, xmax, ymax), c in zip(prob, boxes.tolist(), colors):
         ax.add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
                                    fill=False, color=c, linewidth=3))
-        ax.text(xmin, ymin, CLASSES[1], bbox=dict(facecolor='red', alpha=0.5))
-
+        cl = p.argmax()
+        text = f'{CLASSES[cl]}: {p[cl]:0.2f}'
+        ax.text(xmin, ymin, text, fontsize=15,
+                bbox=dict(facecolor='yellow', alpha=0.5))
     plt.axis('off')
     plt.tight_layout()
-    plt.savefig(output_dir+im_name)
+    plt.savefig('results/'+'result.png')
+    # plt.show()
+
 
 def main(args):
     utils.init_distributed_mode(args)
-    # print("git:\n  {}\n".format(utils.get_sha()))
+    print("git:\n  {}\n".format(utils.get_sha()))
 
     print(args)
 
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
-    # seed = args.seed + utils.get_rank()
-    # torch.manual_seed(seed)
-    # np.random.seed(seed)
-    # random.seed(seed)
+    seed = args.seed + utils.get_rank()
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
     model = Detector(
         num_classes=91, #类别数91
@@ -181,27 +193,31 @@ def main(args):
         use_checkpoint=args.use_checkpoint, #是否使用checkpoint
     )
     model.to(device)
-    # model.eval()
     postprocessors = {'bbox': PostProcess()}
 
     if args.infer:
+        checkpoint = torch.load(args.resume, map_location='cpu')
+        model.load_state_dict(checkpoint['model'])
         img = Image.open(args.input_path)
-        orig_target_sizes = torch.tensor([img.size], dtype=torch.float).to(device)
         # img = Image.open(requests.get(url, stream=True).raw)
         transform = transforms.Compose([
-                    transforms.Resize(425),
+                    transforms.Resize(800),
                     transforms.ToTensor(),
                     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
                 ])
         input_tensor = transform(img).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
+        input_tensor = nested_tensor_from_tensor_list(input_tensor)
         outputs = inference(model, input_tensor,args.device)
-        results = postprocessors['bbox'](outputs, orig_target_sizes)
+        # keep only predictions with 0.7+ confidence
+        probas = outputs['pred_logits'].softmax(-1)[0, :, :-1]
+        keep = probas.max(-1).values > 0.9
+        # convert boxes from [0; 1] to image scales
+        bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)
+
         if args.output_dir != '':
-            draw_boxes(img, args.input_path, results, model)
+            plot_results(img, probas[keep], bboxes_scaled)
 
         return    
-
-
 
     # import pdb;pdb.set_trace()
     model, criterion, postprocessors = build_yolos_model(args)
@@ -214,8 +230,6 @@ def main(args):
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
-
-
 
     def build_optimizer(model, args):
         if hasattr(model.backbone, 'no_weight_decay'):

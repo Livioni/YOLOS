@@ -85,6 +85,16 @@ path/to/coco/
   train2017/    # train images
   val2017/      # val images
 ```
+### Inference
+<pre><code>
+python inference.py --input /path/to/image \
+                    --backbone_name base \
+                    --init_pe_size 800 1344 \
+                    --mid_pe_size 800,1344 \
+                    --resume /path/to/pth \
+                    --output_dir /path/to/folder  \
+</code></pre>
+
 ### Training
 Before finetuning on COCO, you need download the ImageNet pretrained model to the `/path/to/YOLOS/` directory
 <details>
