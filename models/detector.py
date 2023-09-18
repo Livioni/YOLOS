@@ -284,10 +284,13 @@ def build(args):
     # For more details on this, check the following discussion
     # https://github.com/facebookresearch/detr/issues/108#issuecomment-650269223
     num_classes = 20 if args.dataset_file != 'coco' else 91
+    if args.dataset_file == 'pandas':
+        num_classes = 2 
     if args.dataset_file == "coco_panoptic":
         # for panoptic, we just add a num_classes that is large enough to hold
         # max_obj_id + 1, but the exact value doesn't really matter
         num_classes = 250
+    print('num_classes', num_classes)
     device = torch.device(args.device)
 
     # import pdb;pdb.set_trace()
@@ -299,7 +302,6 @@ def build(args):
         init_pe_size=args.init_pe_size, #初始化position embedding大小
         mid_pe_size=args.mid_pe_size, #mid position embedding 大小
         use_checkpoint=args.use_checkpoint, #是否使用checkpoint
-
     )
     matcher = build_matcher(args)
     weight_dict = {'loss_ce': 1, 'loss_bbox': args.bbox_loss_coef}
