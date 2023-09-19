@@ -31,12 +31,22 @@ CLASSES = [
     'toothbrush'
 ]
 
+MOT_CLASSES = ['person']
+
 # colors for visualization
 COLORS = [[0.000, 0.447, 0.741], [0.850, 0.325, 0.098], [0.929, 0.694, 0.125],
           [0.494, 0.184, 0.556], [0.466, 0.674, 0.188], [0.301, 0.745, 0.933]]
 
+'''
+(sequence or int): Desired output size. If size is a sequence like
+(h, w), output size will be matched to this. If size is an int,
+smaller edge of the image will be matched to this number.
+i.e, if height > width, then image will be rescaled to
+(size * height / width, size).
+'''
+
 TRANSFORM = transforms.Compose([
-            transforms.Resize(800),
+            transforms.Resize((512)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
@@ -46,6 +56,8 @@ def get_args_parser():
 
     parser.add_argument('--use_checkpoint', action='store_true',
                         help='use checkpoint.checkpoint to save mem')
+    parser.add_argument('--num_class', default=2, type=int,
+                        help='num of classes in the dataset')
 
     # * model setting
     parser.add_argument("--det_token_num", default=100, type=int,
@@ -61,7 +73,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--input',default='inputs/IMG_0040.jpeg',type=str)
+    parser.add_argument('--input',default='/home/livion/Documents/github/dataset/MOT_yolo/images/val/MOT17-02-000451.jpg',type=str)
 
     return parser
 
@@ -86,7 +98,7 @@ def plot_results(pil_img, prob, boxes):
         ax.add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
                                    fill=False, color=c, linewidth=3))
         cl = p.argmax()
-        text = f'{CLASSES[cl]}: {p[cl]:0.2f}'
+        text = f'{MOT_CLASSES[cl]}: {p[cl]:0.2f}'
         ax.text(xmin, ymin, text, fontsize=15,
                 bbox=dict(facecolor='yellow', alpha=0.5))
     plt.axis('off')
@@ -107,7 +119,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
     random.seed(seed)
 
     model = Detector(
-        num_classes=91, #类别数91
+        num_classes=args.num_class, #类别数91
         pre_trained= args.pre_trained, #pre_train模型pth文件
         det_token_num=args.det_token_num, #100个det token
         backbone_name=args.backbone_name, #vit backbone的型号
@@ -192,7 +204,7 @@ if __name__ == '__main__':
     if args.backbone_name == 'base':
         init_pe_size = [800,1344]
         mid_pe_size = [800,1344]
-        resume = 'yolos_base.pth'
+        resume = 'yolos_base_raw.pth'
     elif args.backbone_name == 'small':
         init_pe_size = [512, 864]
         mid_pe_size = [512, 864]
@@ -200,7 +212,8 @@ if __name__ == '__main__':
     elif args.backbone_name == 'tiny':
         init_pe_size = [800, 1333]
         mid_pe_size = None
-        resume = 'yolos_ti.pth'
+        # resume = 'yolos_ti_raw.pth'
+        resume = 'results/MOT17Det/checkpoint.pth'
     else:
         raise('backbone_name not supported')
 
