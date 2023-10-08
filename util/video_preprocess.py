@@ -3,6 +3,8 @@ import numpy as np
 
 def file_type(file_name):
     # 获取文件名的后缀部分，即'.mp4'等
+    if os.path.isdir(file_name):
+        return 'folder'
     ext = os.path.splitext(file_name)[1]
     if ext in [".mp4", ".avi", ".mov"]:
         return 'video'

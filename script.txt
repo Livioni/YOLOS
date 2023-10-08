@@ -1,0 +1,18 @@
+#### YOLOS-tiny Evaluation #######
+
+python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  \
+               --batch_size 2 --backbone_name tiny --eval --eval_size 512 \
+               --init_pe_size 800 1333 --resume results/MOT15Det/checkpoint0299.pth \
+               --dataset_file mot15
+
+#### YOLOS-tiny Training #######
+
+python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  \
+               --batch_size 2 --backbone_name tiny  \
+               --init_pe_size 800 1333 --lr 5e-5 \
+               --eval_size 512 \
+               --epochs 300 \ 
+               --dataset_file mot15 \
+               --output_dir results/MOT15Det_tiny1
+
+python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  --batch_size 2 --backbone_name tiny  --init_pe_size 800 1333 --lr 5e-5 --eval_size 512 --epochs 300 --dataset_file mot15 --output_dir results/MOT15Det_tiny1
