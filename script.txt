@@ -5,6 +5,8 @@ python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  \
                --init_pe_size 800 1333 --resume results/MOT15Det/checkpoint0299.pth \
                --dataset_file mot15
 
+python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  --batch_size 2 --backbone_name tiny --eval --eval_size 512 --init_pe_size 800 1333 --resume results/MOT15Det_tiny1/checkpoint0299.pth \--dataset_file mot15
+
 #### YOLOS-tiny Training #######
 
 python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  \
@@ -13,6 +15,22 @@ python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  \
                --eval_size 512 \
                --epochs 300 \ 
                --dataset_file mot15 \
-               --output_dir results/MOT15Det_tiny1
+               --output_dir results/MOT15Det_tiny1\
+               --resume yolos_ti_1.pth
 
-python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  --batch_size 2 --backbone_name tiny  --init_pe_size 800 1333 --lr 5e-5 --eval_size 512 --epochs 300 --dataset_file mot15 --output_dir results/MOT15Det_tiny1
+python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  --batch_size 2 --backbone_name tiny  --init_pe_size 800 1333 --lr 5e-5 --eval_size 512 --epochs 300 --dataset_file mot15 --output_dir results/MOT15Det_tiny1 --resume yolos_ti_1.pth
+
+
+完整的map
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.343
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.680
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.300
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.140
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.329
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.384
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.080
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.397
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.407
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.140
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.398
+ Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.447

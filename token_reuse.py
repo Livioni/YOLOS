@@ -46,14 +46,6 @@ MOT_CLASSES = ['person']
 COLORS = [[0.000, 0.447, 0.741], [0.850, 0.325, 0.098], [0.929, 0.694, 0.125],
           [0.494, 0.184, 0.556], [0.466, 0.674, 0.188], [0.301, 0.745, 0.933]]
 
-'''
-(sequence or int): Desired output size. If size is a sequence like
-(h, w), output size will be matched to this. If size is an int,
-smaller edge of the image will be matched to this number.
-i.e, if height > width, then image will be rescaled to
-(size * height / width, size).
-'''
-
 TRANSFORM_tiny = transforms.Compose([
             transforms.Resize((512,688)),
             transforms.ToTensor(),
@@ -75,8 +67,10 @@ def get_args_parser():
                         help='num of classes in the dataset')
     parser.add_argument('--random_drop', default=False, action='store_true',
                         help='random_drop the patch in the image')
-    parser.add_argument('--no_patch_drop', default=True, action='store_true',
+    parser.add_argument('--no_patch_drop', default=False, action='store_true',
                         help='drop the non ROIpatch in the image')
+    parser.add_argument('--token_reuse', default=True, action='store_true',
+                        help='whether to reuse the token in the image')
     parser.add_argument('--drop_porpotion', default=0.8, type=float,
                         help='the porpotion of the patch to drop')
     parser.add_argument('--dataset_file', default='mot15', type=str,
@@ -97,7 +91,8 @@ def get_args_parser():
     parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--input',default='inputs/ADL-Rundle-6/ADL-Rundle-6-000394.jpg',type=str)
+    parser.add_argument('--input',default='inputs/ADL-Rundle-8/ADL-Rundle-8-000498.jpg',type=str)
+    parser.add_argument('--reuse_image',default='inputs/ADL-Rundle-8/ADL-Rundle-8-000491.jpg',type=str)
 
     return parser
 
@@ -153,7 +148,6 @@ def iou(box1, box2):
     union_area = box1_area + box2_area - inter_area
 
     return inter_area / union_area if union_area != 0 else 0
-
 
 def compute_ap(predictions, ground_truth, iou_threshold=0.5):
     """
@@ -255,6 +249,76 @@ def plot_results(pil_img, prob,prob_raw, boxes,boxes_raw,row,backbone='base'):
     plt.savefig('results/'+'result.png')
     # plt.show()
 
+def plot_results_reuse(pil_img, prob,prob_raw, boxes,boxes_raw,row, reuse,backbone='base'):
+    fig, ax = plt.subplots(2, 2, figsize=(30, 20))
+    ax[0,0].imshow(pil_img)
+    ax[1,0].imshow(pil_img)
+    colors = COLORS * 100
+    #左下的图是用原图推理的得到的结果
+    for p, (xmin, ymin, xmax, ymax), c in zip(prob_raw, boxes_raw.tolist(), colors):
+        ax[1,0].add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
+                                   fill=False, color=c, linewidth=3))
+        cl = p.argmax()
+        text = f'{MOT_CLASSES[cl]}: {p[cl]:0.2f}'
+        ax[1,0].text(xmin, ymin, text, fontsize=15,
+                bbox=dict(facecolor='yellow', alpha=0.5))
+
+    ax[1,1].imshow(pil_img)
+    colors = COLORS * 100
+    #右下的图是用drop patch后的图推理的得到的结果
+    for p, (xmin, ymin, xmax, ymax), c in zip(prob, boxes.tolist(), colors):
+        ax[1,1].add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
+                                   fill=False, color=c, linewidth=3))
+        cl = p.argmax()
+        text = f'{MOT_CLASSES[cl]}: {p[cl]:0.2f}'
+        ax[1,1].text(xmin, ymin, text, fontsize=15,
+                bbox=dict(facecolor='yellow', alpha=0.5))
+    img_copy = plot_masked_reuse(pil_img,row,reuse_image=reuse,backbone=backbone)
+    ax[0,1].imshow(img_copy)
+    plt.axis('off')
+    plt.tight_layout()
+    plt.savefig('results/'+'result.png')
+    # plt.show()
+
+def plot_masked_reuse(img,row,reuse_image,backbone='tiny'):
+    original_size = img.size
+    if backbone == 'tiny':
+        transformed_img = TRANSFORM_tiny.transforms[0](img)
+        transformed_img = TRANSFORM_tiny.transforms[1](transformed_img)
+        transformed_img_reuse = TRANSFORM_tiny.transforms[0](reuse_image)
+        transformed_img_reuse = TRANSFORM_tiny.transforms[1](transformed_img_reuse)
+
+    else:
+        transformed_img = TRANSFORM_base.transforms[0](img)
+        transformed_img = TRANSFORM_base.transforms[1](transformed_img)
+        transformed_img_reuse = TRANSFORM_base.transforms[0](reuse_image)
+        transformed_img_reuse = TRANSFORM_base.transforms[1](transformed_img_reuse)
+
+    patch_dim_w, patch_dim_h = transformed_img.shape[2] // 16, transformed_img.shape[1] // 16
+    img_copy = rearrange(transformed_img, 'c (h p1) (w p2) -> (h w) (p1 p2 c)', p1=16, p2=16)
+    img_copy[row, :] = 0.0
+    img_copy = rearrange(img_copy, '(h w) (p1 p2 c) -> c (h p1) (w p2)',p1=16, p2=16,h=patch_dim_h,w=patch_dim_w)
+
+    ref_tensor_patches = rearrange(transformed_img_reuse, 'c (h p1) (w p2) -> (h w) (p1 p2 c)', p1=16, p2=16)
+            
+    # 使用row中的索引从ref_tensor_patches中选取patches
+    replacement_patches = ref_tensor_patches[row, :]
+
+    # 将input_tensor重新整形为patch形式
+    input_tensor_patches = rearrange(transformed_img, 'c (h p1) (w p2) -> (h w) (p1 p2 c)', p1=16, p2=16)
+    
+    # 使用replacement_patches替换input_tensor_patches中的patches
+    input_tensor_patches[row, :] = replacement_patches
+
+    # 将input_tensor_patches重新整形回原始尺寸
+    img_copy = rearrange(input_tensor_patches, '(h w) (p1 p2 c) -> c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
+
+    resize = transforms.Resize((original_size[1],original_size[0]))
+    img_copy = resize(img_copy)
+    #tensor to PIL
+    img_copy = transforms.ToPILImage()(img_copy)
+    return img_copy
+
 def plot_masked(img,row,backbone='tiny'):
     original_size = img.size
     if backbone == 'tiny':
@@ -306,7 +370,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
         patch_dim_w, patch_dim_h = input_tensor.shape[3] // 16, input_tensor.shape[2] // 16
         patch_num = patch_dim_h * patch_dim_w
 
-        bboxes = extract_bboxes_from_coco('/home/livion/Documents/github/dataset/MOT15_coco/annotations/MOT15_instances_vals.json', 'ADL-Rundle-6-000394.jpg')   
+        bboxes = extract_bboxes_from_coco('/home/livion/Documents/github/dataset/MOT15_coco/annotations/MOT15_instances_vals.json', 'ADL-Rundle-8-000498.jpg')   
             
         all_indices = set(range(patch_num))
         reference_bboxes = []
@@ -349,6 +413,35 @@ def main(args, init_pe_size, mid_pe_size, resume):
             input_tensor[:, row, :] = 0.0
             input_tensor = rearrange(input_tensor, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
 
+
+        if args.token_reuse:
+            drop_num = int(len(all_indices) * args.drop_porpotion)
+            # 从除所有bounding boxes外的patches中随机选择要drop的patches
+            row = np.random.choice(list(all_indices), size=drop_num, replace=False)
+            
+            input_tensor = rearrange(input_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
+            input_tensor[:, row, :] = 0.0
+            input_tensor = rearrange(input_tensor, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
+            # 假设你有一个ref_tensor与input_tensor尺寸相同
+            reuse_image = Image.open(args.reuse_image)
+
+            ref_tensor = TRANSFORM(reuse_image).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
+
+            # 将ref_tensor重新整形为patch形式
+            ref_tensor_patches = rearrange(ref_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
+            
+            # 使用row中的索引从ref_tensor_patches中选取patches
+            replacement_patches = ref_tensor_patches[:, row, :]
+
+            # 将input_tensor重新整形为patch形式
+            input_tensor_patches = rearrange(input_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
+            
+            # 使用replacement_patches替换input_tensor_patches中的patches
+            input_tensor_patches[:, row, :] = replacement_patches
+
+            # 将input_tensor_patches重新整形回原始尺寸
+            input_tensor = rearrange(input_tensor_patches, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
+
         ###############raw_inference#########
         with torch.no_grad():
             original_img = original_img.to(device)
@@ -373,14 +466,42 @@ def main(args, init_pe_size, mid_pe_size, resume):
         bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)
 
         if args.output_dir != '':
-            plot_results(img, probas[keep],probas_raw[keep_raw], bboxes_scaled, bboxes_scaled_raw, row, backbone=args.backbone_name)
-
+            if args.token_reuse:
+                plot_results_reuse(img, probas[keep],probas_raw[keep_raw], bboxes_scaled, bboxes_scaled_raw, row, reuse_image, backbone=args.backbone_name)
+            else:
+                plot_results(img, probas[keep],probas_raw[keep_raw], bboxes_scaled, bboxes_scaled_raw, row, backbone=args.backbone_name)
+        
+            
         # 加载Ground Truth数据
         bboxes_scaled_add_confidence = torch.cat((bboxes_scaled, probas[keep]), dim=1)
         bboxes_scale_raw_add_confidence = torch.cat((bboxes_scaled_raw, probas_raw[keep_raw]), dim=1).tolist()
+        # 转换检测结果到COCO格式
+        image_id = 139  # 根据你的数据设置
+        coco_detections = [
+            {
+                "image_id": image_id, 
+                "category_id": 0,  
+                "bbox": [x1, y1, x2-x1, y2-y1], 
+                "score": confidence
+            } 
+            for [x1, y1, x2, y2, confidence] in bboxes_scaled_add_confidence
+        ]
 
-        print('AP@.5 = ',compute_ap(bboxes_scaled_add_confidence, reference_bboxes, 0.5))
-        print('mAP@.50:.05:.95 = ',compute_mAP(bboxes_scaled_add_confidence, reference_bboxes))
+        # 加载Ground Truth数据
+        coco_gt = COCO("/home/livion/Documents/github/dataset/MOT15_coco/annotations/MOT15_instances_vals.json")  # 替换为你的ground truth的COCO格式json文件的路径
+
+        # 使用检测结果来加载COCO detections
+        coco_dt = coco_gt.loadRes(coco_detections)
+
+        # 执行评估
+        coco_eval = COCOeval(coco_gt, coco_dt, 'bbox')
+        coco_eval.params.imgIds = [image_id]  # 设定要评估的图片ID
+        coco_eval.evaluate()
+        coco_eval.accumulate()
+        coco_eval.summarize()
+
+        # print('AP@.5 = ',compute_ap(bboxes_scaled_add_confidence, reference_bboxes, 0.5))
+        # print('mAP@.50:.05:.95 = ',compute_mAP(bboxes_scaled_add_confidence, reference_bboxes))
 
         return 
 

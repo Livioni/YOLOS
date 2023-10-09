@@ -56,7 +56,7 @@ def get_args_parser():
 
     parser.add_argument('--use_checkpoint', action='store_true',
                         help='use checkpoint.checkpoint to save mem')
-    parser.add_argument('--num_class', default=2, type=int,
+    parser.add_argument('--num_class', default=1, type=int,
                         help='num of classes in the dataset')
 
     # * model setting
@@ -73,7 +73,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--input',default='inputs/ETH-Bahnhof_val',type=str)
+    parser.add_argument('--input',default='inputs/ADL-Rundle-8/ADL-Rundle-8-000491.jpg',type=str)
 
     return parser
 
@@ -176,7 +176,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
         out.release()
         return
 
-    elif file_type(args.input) == 'image' or 'folder':
+    elif file_type(args.input) == 'folder':
         file_list = os.listdir(args.input)
         for file in file_list:
             file_path = os.path.join(args.input, file)
@@ -196,6 +196,25 @@ def main(args, init_pe_size, mid_pe_size, resume):
             if args.output_dir != '':
                 plot_results(img, probas[keep], bboxes_scaled, args.output_dir + '/'+ file)
         return    
+    
+    else:
+        img = Image.open(args.input)
+        input_tensor = TRANSFORM(img).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
+        start_time = time()
+        with torch.no_grad():
+            input_tensor = input_tensor.to(device)
+            outputs = model(input_tensor)
+        end_time = time()
+        print(f'Inference Time:{end_time-start_time:.3f}s.')
+        # keep only predictions with 0.7+ confidence
+        probas = outputs['pred_logits'].softmax(-1)[0, :, :-1]
+        keep = probas.max(-1).values > 0.9
+        # convert boxes from [0; 1] to image scales
+        bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)
+        if args.output_dir != '':
+            plot_results(img, probas[keep], bboxes_scaled, args.output_dir + '/'+ 'output.jpg')
+        return    
+
 
 
 if __name__ == '__main__':
@@ -216,7 +235,7 @@ if __name__ == '__main__':
         init_pe_size = [800, 1333]
         mid_pe_size = None
         # resume = 'yolos_ti_raw.pth'
-        resume = 'results/MOT15Det_tiny/checkpoint0299.pth'
+        resume = 'results/MOT15Det_tiny1/checkpoint0299.pth'
     else:
         raise('backbone_name not supported')
 
