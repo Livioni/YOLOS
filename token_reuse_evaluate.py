@@ -19,7 +19,7 @@ def get_args_parser():
 
     parser.add_argument('--use_checkpoint', action='store_true',
                         help='use checkpoint.checkpoint to save mem')
-    parser.add_argument('--num_class', default=2, type=int,
+    parser.add_argument('--num_class', default=1, type=int,
                         help='num of classes in the dataset')
     parser.add_argument('--random_drop', default=False, action='store_true',
                         help='random_drop the patch in the image')
@@ -47,7 +47,7 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--output_dir', default='results',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--device', default='cpu',
+    parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--resume', default='', help='resume from checkpoint')
@@ -124,7 +124,7 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, devic
     with torch.no_grad():
         original_img = original_img.to(device)
         outputs_raw = model(original_img)
-    probas_raw = outputs_raw['pred_logits'].softmax(-1)[0, :, :-2]
+    probas_raw = outputs_raw['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
     keep_raw = probas_raw.max(-1).values > 0.9
     # convert boxes from [0; 1] to image scales
     bboxes_scaled_raw = rescale_bboxes(outputs_raw['pred_boxes'][0, keep_raw], img.size)
@@ -134,7 +134,7 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, devic
         input_tensor = input_tensor.to(device)
         outputs = model(input_tensor)
     # keep only predictions with 0.7+ confidence
-    probas = outputs['pred_logits'].softmax(-1)[0, :, :-2]
+    probas = outputs['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
     keep = probas.max(-1).values > 0.9
     # convert boxes from [0; 1] to image scales
     bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)
@@ -164,7 +164,8 @@ def main(args):
         elif args.backbone_name == 'tiny':
             init_pe_size = [800, 1333]
             mid_pe_size = None
-            resume = 'results/MOT15Det_tiny/checkpoint0299.pth'
+            # resume = 'results/MOT15Det_tiny/checkpoint0299.pth'
+            resume = 'results/MOT15Det_tiny1/checkpoint0199.pth'
         else:
             raise('backbone_name not supported')
     else:
@@ -180,7 +181,7 @@ def main(args):
         use_checkpoint=args.use_checkpoint, #是否使用checkpoint
     )
     model.to(device)
-    checkpoint = torch.load(resume, map_location='cpu')
+    checkpoint = torch.load(resume, map_location=args.device)
     model.load_state_dict(checkpoint['model'], strict=False)
     model.eval()
 

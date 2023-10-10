@@ -63,15 +63,15 @@ def get_args_parser():
 
     parser.add_argument('--use_checkpoint', action='store_true',
                         help='use checkpoint.checkpoint to save mem')
-    parser.add_argument('--num_class', default=2, type=int,
+    parser.add_argument('--num_class', default=1, type=int,
                         help='num of classes in the dataset')
     parser.add_argument('--random_drop', default=False, action='store_true',
                         help='random_drop the patch in the image')
-    parser.add_argument('--no_patch_drop', default=False, action='store_true',
+    parser.add_argument('--no_patch_drop', default=True, action='store_true',
                         help='drop the non ROIpatch in the image')
-    parser.add_argument('--token_reuse', default=True, action='store_true',
+    parser.add_argument('--token_reuse', default=False, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_porpotion', default=0.8, type=float,
+    parser.add_argument('--drop_porpotion', default=0.0, type=float,
                         help='the porpotion of the patch to drop')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
@@ -88,7 +88,7 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--output_dir', default='results',
                         help='path where to save, empty for no saving')
-    parser.add_argument('--device', default='cpu',
+    parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--input',default='inputs/ADL-Rundle-8/ADL-Rundle-8-000498.jpg',type=str)
@@ -359,7 +359,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
         use_checkpoint=args.use_checkpoint, #是否使用checkpoint
     )
     model.to(device)
-    checkpoint = torch.load(resume, map_location='cpu')
+    checkpoint = torch.load(resume, map_location=args.device)
     model.load_state_dict(checkpoint['model'], strict=False)
 
     if file_type(args.input) == 'image':
@@ -446,7 +446,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
         with torch.no_grad():
             original_img = original_img.to(device)
             outputs_raw = model(original_img)
-        probas_raw = outputs_raw['pred_logits'].softmax(-1)[0, :, :-2]
+        probas_raw = outputs_raw['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
         keep_raw = probas_raw.max(-1).values > 0.9
         # convert boxes from [0; 1] to image scales
         bboxes_scaled_raw = rescale_bboxes(outputs_raw['pred_boxes'][0, keep_raw], img.size)
@@ -460,7 +460,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
         print(f'Inference Time:{end_time-start_time:.3f}s.')
 
         # keep only predictions with 0.7+ confidence
-        probas = outputs['pred_logits'].softmax(-1)[0, :, :-2]
+        probas = outputs['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
         keep = probas.max(-1).values > 0.9
         # convert boxes from [0; 1] to image scales
         bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)

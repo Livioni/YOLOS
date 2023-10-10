@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import json
 
 # 从txt文件中读取数据
-with open('results/MOT15Det_tiny/log.txt', 'r') as f:
+with open('results/MOT15Det_tiny1/log.txt', 'r') as f:
     lines = f.readlines()
     data = [json.loads(line) for line in lines]
 
@@ -24,7 +24,7 @@ plt.legend()
 plt.grid(True)
 # plt.show()
 plt.tight_layout()
-plt.savefig('results/MOT15Det_tiny/loss.png')
+plt.savefig('results/MOT15Det_tiny1/loss.png')
 
 # 绘制训练和测试的分类错误曲线
 plt.figure(figsize=(10, 5))
@@ -37,6 +37,6 @@ plt.legend()
 plt.grid(True)
 # plt.show()
 plt.tight_layout()
-plt.savefig('results/MOT15Det_tiny/class_error.png')
+plt.savefig('results/MOT15Det_tiny1/class_error.png')
 
 # 你可以继续为其他指标添加更多的绘图代码...
