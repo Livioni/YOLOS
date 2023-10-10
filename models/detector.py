@@ -66,6 +66,44 @@ class Detector(nn.Module):
             samples = nested_tensor_from_tensor_list(samples)
         attention = self.backbone(samples.tensors, return_attention=True)
         return attention
+    
+class ReuseDetector(nn.Module):
+    def __init__(self, num_classes, pre_trained=None, det_token_num=100, backbone_name='tiny', init_pe_size=[800,1344], mid_pe_size=None, use_checkpoint=False):
+        super().__init__()
+        # import pdb;pdb.set_trace()
+        if backbone_name == 'tiny':
+            self.backbone, hidden_dim = reuse_tiny(pretrained=pre_trained)
+        elif backbone_name == 'small':
+            self.backbone, hidden_dim = small(pretrained=pre_trained)
+        elif backbone_name == 'base':
+            self.backbone, hidden_dim = base(pretrained=pre_trained)
+        elif backbone_name == 'small_dWr':
+            self.backbone, hidden_dim = small_dWr(pretrained=pre_trained)
+        else:
+            raise ValueError(f'backbone {backbone_name} not supported')
+        
+        self.backbone.finetune_det(det_token_num=det_token_num, img_size=init_pe_size, mid_pe_size=mid_pe_size, use_checkpoint=use_checkpoint)
+        
+        self.class_embed = MLP(hidden_dim, hidden_dim, num_classes + 1, 3) #输出为91维向量
+        self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3) #输出为4维向量
+    
+    def forward(self, samples: NestedTensor, reuse_embedding: torch.Tensor, reuse_region : list, drop_proportion: int):
+        # import pdb;pdb.set_trace()
+        if isinstance(samples, (list, torch.Tensor)):
+            samples = nested_tensor_from_tensor_list(samples)
+        x,saved_embedding = self.backbone(samples.tensors, reuse_embedding, reuse_region, drop_proportion)
+        # x = x[:, 1:,:]
+        outputs_class = self.class_embed(x)
+        outputs_coord = self.bbox_embed(x).sigmoid()
+        out = {'pred_logits': outputs_class, 'pred_boxes': outputs_coord}
+        return out,saved_embedding
+
+    def forward_return_attention(self, samples: NestedTensor):
+        if isinstance(samples, (list, torch.Tensor)):
+            samples = nested_tensor_from_tensor_list(samples)
+        attention = self.backbone(samples.tensors, return_attention=True)
+        return attention
+
 
 class SetCriterion(nn.Module):
     """ This class computes the loss for DETR.

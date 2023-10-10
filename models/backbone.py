@@ -1,6 +1,8 @@
 import torch
+import numpy as np
 import torch.nn as nn
 from functools import partial
+from einops import rearrange
 from .layers import DropPath, to_2tuple, trunc_normal_
 import torch.utils.checkpoint as checkpoint 
 
@@ -100,6 +102,52 @@ class PatchEmbed(nn.Module):
         embeddings = self.proj(x).flatten(2).transpose(1, 2)
         return embeddings
 
+class ReuseEmbed(nn.Module):
+    """ Image to Patch Embedding
+    """
+    def __init__(self, img_size=[512,864], patch_size=16, in_chans=3, embed_dim=384):
+        super().__init__()
+        img_size = to_2tuple(img_size)
+        patch_size = to_2tuple(patch_size)
+        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.num_patches = num_patches
+
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+
+    def forward(self, x, reuse_embedding, reuse_region, drop_proportion=0.1):
+        B, C, H, W = x.shape
+        # FIXME look at relaxing size constraints
+        # assert H == self.img_size[0] and W == self.img_size[1], \
+        #     f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        patch_dim_w, patch_dim_h = W//16, H//16
+        all_indices = set(range(patch_dim_h * patch_dim_w))
+        row = None
+        if reuse_embedding is not None or reuse_region is not None:
+            for bbox in reuse_region:
+                x1, y1, x2, y2 = bbox
+                # 计算与bounding box相关的patch的开始和结束索引
+                start_row_idx = y1 //16
+                start_col_idx = x1 // 16
+                end_row_idx = y2 // 16
+                end_col_idx = x2 // 16
+                
+                # 从所有的patch中移除当前bounding box内的patch
+                for i in range(int(start_row_idx), int(end_row_idx)+1):
+                    for j in range(int(start_col_idx), int(end_col_idx)+1):
+                        patch_idx = i * patch_dim_w + j
+                        all_indices.discard(patch_idx)
+            drop_num = int(len(all_indices) * drop_proportion)
+            row = np.random.choice(list(all_indices), size=drop_num, replace=False)
+
+        embeddings_to_save = self.proj(x)
+        embeddings_to_save = embeddings_to_save.flatten(2)
+        if reuse_embedding is not None and len(row) > 0:
+            replace_embedding = reuse_embedding[:,:,row]
+            embeddings_to_save[:,:,row] = replace_embedding
+        embeddings = embeddings_to_save.transpose(1, 2)
+        return embeddings, embeddings_to_save
 
 class HybridEmbed(nn.Module):
     """ CNN Feature Map Embedding
@@ -386,6 +434,64 @@ class VisionTransformer(nn.Module):
         else:
             x = self.forward_features(x)
             return x
+        
+class VisionTransformerTokenReuse(VisionTransformer):
+    """ Vision Transformer with support for patch or hybrid CNN input stage
+    """
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
+                 num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
+                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False):
+        super().__init__(img_size=img_size, patch_size=patch_size, in_chans=in_chans, num_classes=num_classes, embed_dim=embed_dim, depth=depth,
+                 num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
+                 drop_path_rate=drop_path_rate, hybrid_backbone=hybrid_backbone, norm_layer=norm_layer, is_distill=is_distill)
+        self.patch_embed = ReuseEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+        
+    def forward_features(self, x, reuse_embedding, reuse_region, drop_propotion):
+        # import pdb;pdb.set_trace()
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+        # if (H,W) != self.img_size:
+        #     self.finetune = True
+        x, saved_embedding = self.patch_embed(x, reuse_embedding, reuse_region, drop_propotion)
+        # interpolate init pe
+        if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
+            temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, img_size=(H,W))
+        else:
+            temp_pos_embed = self.pos_embed
+        # interpolate mid pe
+        if self.has_mid_pe:
+            # temp_mid_pos_embed = []
+            if (self.mid_pos_embed.shape[2] - 1 - self.det_token_num) != x.shape[1]:
+                temp_mid_pos_embed = self.InterpolateMidPosEmbed(self.mid_pos_embed, img_size=(H,W))
+            else:
+                temp_mid_pos_embed = self.mid_pos_embed
+
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        det_token = self.det_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x, det_token), dim=1)
+        x = x + temp_pos_embed
+        x = self.pos_drop(x)
+
+        for i in range(len((self.blocks))):
+            if self.use_checkpoint:
+                x = checkpoint.checkpoint(self.blocks[i], x)    # saves mem, takes time
+            else:
+                x = self.blocks[i](x)
+            if self.has_mid_pe:
+                if i < (self.depth - 1):
+                    x = x + temp_mid_pos_embed[i]
+
+        x = self.norm(x)
+
+        return x[:, -self.det_token_num:, :],saved_embedding
+    
+    def forward(self, x, reuse_embedding, reuse_region, drop_propotion, return_attention=False):
+        if return_attention == True:
+            # return self.forward_selfattention(x)
+            return self.forward_return_all_selfattention(x)
+        else:
+            x,saved_embedding = self.forward_features(x, reuse_embedding, reuse_region,drop_propotion)
+            return x, saved_embedding
 
 
 def _conv_filter(state_dict, patch_size=16):
@@ -396,6 +502,20 @@ def _conv_filter(state_dict, patch_size=16):
             v = v.reshape((v.shape[0], 3, patch_size, patch_size))
         out_dict[k] = v
     return out_dict
+
+def reuse_tiny(pretrained=None, **kwargs):
+    model = VisionTransformerTokenReuse(
+                patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6))
+    if pretrained: 
+        # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_tiny_patch16_224-a1311bcf.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 192
 
 def tiny(pretrained=None, **kwargs):
     model = VisionTransformer(
@@ -454,6 +574,7 @@ def base(pretrained=None, **kwargs):
     return model, 768
 
 if __name__ == '__main__':
-    backbone, hidden_dim = tiny(pretrained="deit_tiny_patch16_224-a1311bcf.pth")
-    backbone.finetune_det(det_token_num=100, img_size=[800, 1344], mid_pe_size=[800, 1344], use_checkpoint=True)
-    
+    model = VisionTransformerTokenReuse(
+                patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6))
+     

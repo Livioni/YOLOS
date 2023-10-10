@@ -67,11 +67,11 @@ def get_args_parser():
                         help='num of classes in the dataset')
     parser.add_argument('--random_drop', default=False, action='store_true',
                         help='random_drop the patch in the image')
-    parser.add_argument('--no_patch_drop', default=True, action='store_true',
+    parser.add_argument('--no_patch_drop', default=False, action='store_true',
                         help='drop the non ROIpatch in the image')
-    parser.add_argument('--token_reuse', default=False, action='store_true',
+    parser.add_argument('--token_reuse', default=True, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_porpotion', default=0.0, type=float,
+    parser.add_argument('--drop_porpotion', default=0.8, type=float,
                         help='the porpotion of the patch to drop')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')

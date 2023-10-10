@@ -162,3 +162,18 @@ def detections_to_cocojson(all_detections, all_image_ids, output_path):
     # Save to JSON file
     with open(output_path, "w") as f:
         json.dump(coco_output, f)
+
+def resize_bbox(bbox, original_size, target_size):
+    W, H = original_size
+    h, w = target_size
+
+    scale_w = w / W
+    scale_h = h / H
+
+    x1, y1, x2, y2 = bbox
+    x1_new = x1 * scale_w
+    y1_new = y1 * scale_h
+    x2_new = x2 * scale_w
+    y2_new = y2 * scale_h
+
+    return [x1_new, y1_new, x2_new, y2_new]
