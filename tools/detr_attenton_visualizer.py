@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 sys.path.append('/home/livion/Documents/github/fork/YOLOS/') 
 import util.misc as utils
-from models.detector import ReuseDetector
+from models.detector import ReuseDetector,Detector
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -58,36 +58,72 @@ def get_args_parser():
 
     return parser
 
-def visualize_attention(fname, bbox_scaled_c, attention_map, color):
-    im = Image.open(fname)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(32, 9), dpi=300)  # Two subplots side by side
-
-    # Left subplot: Original image with bbox
-    ax1.imshow(im)
-    xmin, ymin, xmax, ymax, p = bbox_scaled_c
-    color = [x / 255.0 for x in color]
-    rect1 = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor=color, facecolor=None, fill=False)
-    ax1.add_patch(rect1)
-    text1 = f'{MOT_CLASSES[0]}: {p:0.2f}'
-    ax1.text(xmin, ymin, text1, bbox=dict(facecolor=color, alpha=0.6), fontsize=12, color='white', va="bottom")
-
-    # Right subplot: Attention map with bbox
-    im_display = ax2.imshow(attention_map)
-    rect2 = patches.Rectangle((xmin, ymin), xmax-xmin, ymax-ymin, linewidth=2, edgecolor=color, facecolor=None, fill=False)
-    ax2.add_patch(rect2)
-    text2 = f'{MOT_CLASSES[0]}: {p:0.2f}'
-    ax2.text(xmin, ymin, text2, bbox=dict(facecolor=color, alpha=0.6), fontsize=12, color='white', va="bottom")
-    ax2.axis('off')
+def create_subplots(n):
+    fig = plt.figure(figsize=(10, 5))  # Adjust the figure size as needed
+    rows = n // 2
+    rows = 1 if rows < 1 else rows
+    gs = fig.add_gridspec(rows, 4)
     
-    # Add colorbar for the heatmap
-    fig.colorbar(im_display, ax=ax2,fraction=0.026, pad=0.04)
+    axs = []
+    for i in range(rows):
+        axs.append(fig.add_subplot(gs[i, 0]))  # First column
+        if len(axs) < n:  # To avoid creating extra subplots if n is odd
+            axs.append(fig.add_subplot(gs[i, -1]))  # Last column
+            
+    return fig, axs, gs
+
+def visualize_self_attention(image,image_tensor, bbox_scaled_c, bbox_c, attention):
+    im = Image.open(image)
+    if len(bbox_scaled_c) <= 0:
+        return
+    shape = [image_tensor.shape[-2]//16, image_tensor.shape[-1]//16]
+    self_atten = attention.mean(dim=0)
+    sattn = self_atten.reshape(shape + shape)
+    #get bbox center
+    idxs = []
+    raw_idxs = []
+    for bbox in bbox_c:
+        xmin, ymin, xmax, ymax, p = bbox
+        y_center = int((xmin + xmax) / 2)
+        x_center = int((ymin + ymax) / 2)
+        idxs.append((x_center, y_center))
+
+    for bbox in bbox_scaled_c: 
+        xmin, ymin, xmax, ymax, p = bbox
+        y_center = int((xmin + xmax) / 2)
+        x_center = int((ymin + ymax) / 2)
+        raw_idxs.append((x_center, y_center))
+
+    fact = 16
+    # here we create the canvas
+    fig, axs, gs = create_subplots(len(idxs))
+
+    # for each one of the reference points, let's plot the self-attention
+    # for that point
+    for ind,[idx_o, ax] in enumerate(zip(idxs, axs)):
+        idx = (idx_o[0] // fact, idx_o[1] // fact)
+        ax.imshow(sattn[..., idx[0], idx[1]], cmap='cividis', interpolation='nearest')
+        ax.plot(idx[1], idx[0], 'ro')
+        ax.axis('off')
+        ax.set_title(f'self-attention{idx_o}')
+    
+    # and now let's add the central image, with the reference points as red circles
+    fcenter_ax = fig.add_subplot(gs[:, 1:-1])
+    fcenter_ax.imshow(im)
+    for (y, x) in raw_idxs:
+        fcenter_ax.add_patch(plt.Circle((x,y), fact // 2, color='r'))
+        fcenter_ax.axis('off')
+
+    for bbox in bbox_scaled_c: 
+        xmin, ymin, xmax, ymax, p = bbox
+        fcenter_ax.add_patch(patches.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, linewidth=1, edgecolor='r', facecolor='none'))
+    
 
     plt.tight_layout()
-    plt.savefig('results/attention_visualize.jpg', bbox_inches='tight', pad_inches=0, dpi=300)
+    save_image_path = image.split('/')[-1]
+    plt.savefig('results/MOT15_val_attention_visualize/'+save_image_path, bbox_inches='tight', pad_inches=0, dpi=300)
     plt.close()
-
-def visualize_self_attention(fname, bbox_scaled_c, attention_map, color):
-    pass
+    return
 
 def get_one_query_meanattn(vis_attn,h_featmap,w_featmap):
     mean_attentions = vis_attn.mean(0).reshape(h_featmap, w_featmap)
@@ -128,7 +164,7 @@ def get_intersection_area(att_map, bbox, threshold):
     intersection_proportion = round(intersection_area / original_area,4)
     return intersection_area, intersection_proportion
 
-def attention_inference(model, image_path : str, args):
+def detr_attention_inference(model, image_path : str, args):
     img = Image.open(image_path)
     TRANSFORM = TRANSFORM_tiny if args.backbone_name == 'tiny' else TRANSFORM_base
     reference_tensor = TRANSFORM(img).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
@@ -139,38 +175,25 @@ def attention_inference(model, image_path : str, args):
     ground_truth_bbox = [resize_bbox(bbox, img.size, reference_tensor.shape[-2:]) for bbox in bboxes]
     ###############reference_inference#########
     with torch.no_grad():
-        reuse_embedding = None
-        reuse_region = None
         reference_tensor = reference_tensor.to(args.device)
-        outputs_reference,saved_embedding,_ = model(reference_tensor,reuse_embedding,reuse_region,args.drop_proportion)
+        # outputs_reference, saved_embedding, _ = model(reference_tensor,reuse_embedding,reuse_region,args.drop_proportion)
+        outputs_reference = model(reference_tensor)
         attention = model.forward_return_attention(reference_tensor)
         attention = attention[-1].detach().cpu()
         nh = attention.shape[1] # number of head
-        attention = attention[0, :, -args.det_token_num:, 1:-args.det_token_num]
+        attention = attention[0, :, 1:-args.det_token_num, 1:-args.det_token_num]
     probas_reference = outputs_reference['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
     keep_reference = probas_reference.max(-1).values > 0.9
     # convert boxes from [0; 1] to image scales
     bboxes_scaled_reference = rescale_bboxes(outputs_reference['pred_boxes'][0, keep_reference], img.size)
-    bboxes_scale_reference_add_confidence = torch.cat((bboxes_scaled_reference, probas_reference[keep_reference]), dim=1).tolist()
-    return reference_tensor,outputs_reference,bboxes_scale_reference_add_confidence, reference_image_id, attention, ground_truth_bbox
-
-def correlation(image,image_path,output,ground_truth_bbox,predict_bbox_c,attention):
-    w_featmap = image.shape[3] // 16
-    h_featmap = image.shape[2] // 16
-    probas = output['pred_logits'].softmax(-1)[0, :, :-1].cpu()
-    keep = probas.max(-1).values > 0.9
-    scaled_bboxes = rescale_bboxes(output['pred_boxes'][0, keep], [image.shape[3], image.shape[2]])
-    scaled_bboxes_c = torch.cat((scaled_bboxes, probas[keep]), dim=1).tolist()
-    #预测中置信度较高的det-token
-    vis_indexs = torch.nonzero(keep).squeeze(1)
-    for ind,vis_index in enumerate(vis_indexs):
-        vis_attn = attention[:, vis_index, :]
-        mean_attention = get_one_query_meanattn(vis_attn, h_featmap, w_featmap)
-        mean_attention = mean_attention[0]
-        intersection_area,intersection_proportion = get_intersection_area(mean_attention, scaled_bboxes_c[ind], threshold=0.0004)
-        visualize_attention(image_path, predict_bbox_c[ind], attention_map=mean_attention, color=[0,0,255])
-
-    return
+    bboxes_scaled_transform = rescale_bboxes(outputs_reference['pred_boxes'][0, keep_reference], [reference_tensor.shape[-1],reference_tensor.shape[-2]])
+    bboxes_scale_reference_c = torch.cat((bboxes_scaled_reference, probas_reference[keep_reference]), dim=1).tolist()
+    bboxes_scaled_transform_c = torch.cat((bboxes_scaled_transform, probas_reference[keep_reference]), dim=1).tolist()
+    return reference_tensor,\
+           bboxes_scale_reference_c,\
+           bboxes_scaled_transform_c,\
+           attention,ground_truth_bbox,\
+           reference_image_id
 
 def main(args):
     # utils.init_distributed_mode(args)
@@ -198,7 +221,7 @@ def main(args):
     else:
         raise('dataset_file not supported')
         
-    model = ReuseDetector(
+    model = Detector(
         num_classes=args.num_class, #类别数91
         pre_trained= args.pre_trained, #pre_train模型pth文件
         det_token_num=args.det_token_num, #100个det token
@@ -217,14 +240,8 @@ def main(args):
     reference_id_pool = []
     for image in tqdm(image_paths):
         # reference_tensor,outputs_reference,bboxes_scale_reference_add_confidence, reference_image_id, attention, ground_truth_bbox
-        image_tensor,outputs_reference,reference_bbox_c,reference_id, attention, ground_truth_bbox = attention_inference(model,image,args)
-        # correlation(image=image_tensor,\
-        #             image_path = image,\
-        #             output=outputs_reference,\
-        #             ground_truth_bbox=ground_truth_bbox,\
-        #             predict_bbox_c=reference_bbox_c,\
-        #             attention=attention)
-
+        reference_tensor,reference_bbox_c,transform_bbox_c,attention,ground_truth_bbox,reference_id = detr_attention_inference(model,image,args)
+        visualize_self_attention(image,reference_tensor, reference_bbox_c, transform_bbox_c, attention)
         reference_prediction.append(reference_bbox_c)
         reference_id_pool.append(reference_id)
         # print('image_id: ', reference_id,'inference time: ', round(end_time - start_time,4), 's')

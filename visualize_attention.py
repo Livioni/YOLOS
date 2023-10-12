@@ -19,7 +19,7 @@ torch.set_grad_enabled(False)
 CLASSES = ['person']
 
 TRANSFORM = transforms.Compose([
-            transforms.Resize((512)), #eval_size
+            transforms.Resize((512,688)), #eval_size
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
@@ -151,7 +151,7 @@ def get_args_parser():
     parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
     parser.add_argument('--project', default='./visualization', help='Path where to save visualizations.')
     parser.add_argument('--name', default='exp', help='save to project/name')
-    parser.add_argument('--input', default='/home/livion/Documents/github/dataset/MOT15_coco/val/ADL-Rundle-6-000394.jpg', type=str, help='input of data (image or folder path)')
+    parser.add_argument('--input', default='/home/livion/Documents/github/dataset/MOT15_coco/val/ETH-Bahnhof-000751.jpg', type=str, help='input of data (image or folder path)')
     parser.add_argument('--backbone_name', default='tiny', type=str,
                         help="Name of the deit backbone to use")
     parser.add_argument('--coco_path', default='/Volumes/Livion/COCO', type=str,
@@ -229,13 +229,13 @@ for vis_index in vis_indexs:
     mean_attention = get_one_query_meanattn(vis_attn, h_featmap, w_featmap)
     mean_attention = mean_attention[0]
     fname = os.path.join(token_dir, "attn-head-mean" + ".png")
-    plt.imsave(fname=fname, arr=mean_attention, format='png')
+    plt.imsave(fname=fname, arr=mean_attention, format='png',cmap='cividis')
     draw_bbox_in_img(fname, bbox_scaled, score, color=[0,0,255])
     print(f"{fname} saved.")
     attn = get_one_query_attn(vis_attn, h_featmap, w_featmap,nh)
     for j in range(nh):
         fname = os.path.join(token_dir, "attn-head" + str(j) + ".png")
-        plt.imsave(fname=fname, arr=attn[j], format='png')
+        plt.imsave(fname=fname, arr=attn[j], format='png',cmap='cividis')
         draw_bbox_in_img(fname, bbox_scaled, score, color=[0,0,255])
         print(f"{fname} saved.")
     

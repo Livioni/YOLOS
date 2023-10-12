@@ -22,7 +22,9 @@ python main.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco  --b
 
 
 #### YOLOS-base Training #######
-python main.py --coco_path /home/xns/phs/dataset/MOT15_coco\
+python main.py --coco_path /home/xns/phs/dataset/MOT15_coco --backbone_name base\
                --batch_size 1  --init_pe_size 800 1344 --mid_pe_size 800 1344\
                --lr 5e-5 --eval_size 800 --epochs 300 --dataset_file mot15 \
                --output_dir results/MOT15Det_base --resume yolos_base_1.pth
+
+python main.py --coco_path /home/xns/phs/dataset/MOT15_coco --backbone_name base --batch_size 1  --init_pe_size 800 1344 --mid_pe_size 800 1344 --lr 5e-5 --eval_size 800 --epochs 300 --dataset_file mot15 --output_dir results/MOT15Det_base --resume results/MOT15Det_base/checkpoint.pth
