@@ -1,6 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-import torch,warnings,argparse,copy,random,os,json,tempfile
+import torch,warnings,argparse,copy,random,os
 from time import time
+from tqdm.contrib import tzip
 from pathlib import Path
 from PIL import Image
 import numpy as np
@@ -74,7 +75,7 @@ def val_dataset_preporcess(args):
 
     return image_paths, reuse_image_paths
 
-def token_reuse_inference(model, image_path : str, reuse_image_path : str, device : str, args):
+def token_reuse_inference(model, image_path : str, reuse_image_path : str, args):
     img = Image.open(image_path)
     TRANSFORM = TRANSFORM_tiny if args.backbone_name == 'tiny' else TRANSFORM_base
     input_tensor = TRANSFORM(img).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
@@ -124,7 +125,7 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, devic
 
     ###############raw_inference#########
     with torch.no_grad():
-        original_img = original_img.to(device)
+        original_img = original_img.to(args.device)
         outputs_raw = model(original_img)
     probas_raw = outputs_raw['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
     keep_raw = probas_raw.max(-1).values > 0.9
@@ -133,7 +134,7 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, devic
 
     ###############drop_inference#########
     with torch.no_grad():
-        input_tensor = input_tensor.to(device)
+        input_tensor = input_tensor.to(args.device)
         outputs = model(input_tensor)
     # keep only predictions with 0.7+ confidence
     probas = outputs['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
@@ -190,9 +191,9 @@ def main(args):
     raw_prediction = []
     reuse_prediction = []
     image_id_pool = []
-    for image, reuse_image in zip(image_paths,reuse_image_paths):
+    for image, reuse_image in tzip(image_paths,reuse_image_paths):
         start_time = time()
-        raw_bbox_c, reuse_bbox_c, image_id = token_reuse_inference(model,image,reuse_image,device,args)
+        raw_bbox_c, reuse_bbox_c, image_id = token_reuse_inference(model,image,reuse_image,args)
         end_time = time()
         raw_prediction.append(raw_bbox_c)
         reuse_prediction.append(reuse_bbox_c)

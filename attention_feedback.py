@@ -1,7 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import torch,warnings,argparse,random,os
-from tqdm.contrib import tzip
 from time import time
+from tqdm.contrib import tzip
 from pathlib import Path
 from PIL import Image
 import numpy as np
@@ -85,15 +85,17 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, args)
         reuse_region = None
         reference_tensor = reference_tensor.to(args.device)
         outputs_reference,saved_embedding,_ = model(reference_tensor,reuse_embedding,reuse_region,args.drop_proportion)
+        attention = model.forward_return_attention(reference_tensor)
     probas_reference = outputs_reference['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
     keep_reference = probas_reference.max(-1).values > 0.9
     # convert boxes from [0; 1] to image scales
     bboxes_scaled_reference = rescale_bboxes(outputs_reference['pred_boxes'][0, keep_reference], img.size)
     bboxes_scale_reference_add_confidence = torch.cat((bboxes_scaled_reference, probas_reference[keep_reference]), dim=1).tolist()
+    new_bbox = bboxes_scaled_reference
     ################drop_inference#############
     with torch.no_grad():
         reuse_embedding = saved_embedding
-        reuse_region = ground_truth_bbox
+        reuse_region = new_bbox
         input_tensor = input_tensor.to(args.device)
         outputs,_,debug_data = model(input_tensor,reuse_embedding,reuse_region,args.drop_proportion)
     # keep only predictions with 0.7+ confidence
@@ -160,7 +162,7 @@ def main(args):
         reference_id_pool.append(reference_id)
         image_id_pool.append(image_id)
         reuse_propotion.append(debug_data['reuse_proportion'])
-        # print('image_id: ', image_id,'inference time: ', round(end_time - start_time,4), 's')
+        print('image_id: ', image_id,'inference time: ', round(end_time - start_time,4), 's')
 
     reference_result = detections_to_coco_format(reference_prediction, reference_id_pool)
     reuse_result = detections_to_coco_format(reuse_prediction, image_id_pool)
@@ -191,8 +193,8 @@ def main(args):
     reuse_coco_eval.evaluate()
     reuse_coco_eval.accumulate()
     reuse_coco_eval.summarize()
-
     print('Reuse Proportion: ', np.mean(reuse_propotion))
+
     return
 
 

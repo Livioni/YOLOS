@@ -91,17 +91,17 @@ class ReuseDetector(nn.Module):
         # import pdb;pdb.set_trace()
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
-        x,saved_embedding = self.backbone(samples.tensors, reuse_embedding, reuse_region, drop_proportion)
+        x,saved_embedding,debug_data = self.backbone(samples.tensors, reuse_embedding, reuse_region, drop_proportion)
         # x = x[:, 1:,:]
         outputs_class = self.class_embed(x)
         outputs_coord = self.bbox_embed(x).sigmoid()
         out = {'pred_logits': outputs_class, 'pred_boxes': outputs_coord}
-        return out,saved_embedding
+        return out,saved_embedding,debug_data
 
     def forward_return_attention(self, samples: NestedTensor):
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
-        attention = self.backbone(samples.tensors, return_attention=True)
+        attention = self.backbone(samples.tensors,reuse_embedding=None, reuse_region=None, drop_proportion=None, return_attention=True)
         return attention
 
 

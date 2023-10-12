@@ -8,7 +8,6 @@ import cv2
 from PIL import Image
 import torchvision
 import torchvision.transforms as transforms
-from util.misc import nested_tensor_from_tensor_list
 import argparse
 import datasets.transforms as T
 import copy
@@ -152,7 +151,7 @@ def get_args_parser():
     parser.add_argument('--patch_size', default=16, type=int, help='Patch resolution of the model.')
     parser.add_argument('--project', default='./visualization', help='Path where to save visualizations.')
     parser.add_argument('--name', default='exp', help='save to project/name')
-    parser.add_argument('--input', default='inputs/ETH-Bahnhof_val/000866.jpg', type=str, help='input of data (image or folder path)')
+    parser.add_argument('--input', default='/home/livion/Documents/github/dataset/MOT15_coco/val/ADL-Rundle-6-000394.jpg', type=str, help='input of data (image or folder path)')
     parser.add_argument('--backbone_name', default='tiny', type=str,
                         help="Name of the deit backbone to use")
     parser.add_argument('--coco_path', default='/Volumes/Livion/COCO', type=str,
@@ -174,7 +173,7 @@ args = parser.parse_args("")
 args.output_dir = str(increment_path(Path(args.project) / args.name))
 
 model = Detector(
-    num_classes=2,
+    num_classes=1,
     pre_trained=args.pre_trained,
     det_token_num=args.det_token_num,
     backbone_name=args.backbone_name,
@@ -214,6 +213,7 @@ torchvision.utils.save_image(torchvision.utils.make_grid(img, normalize=True, sc
 # save pred image
 save_pred_fig(args.output_dir, result_dic, keep)
 
+
 # save token image
 h, w = ret.shape[2:]
 w_featmap = ret.shape[3] // args.patch_size
@@ -230,6 +230,7 @@ for vis_index in vis_indexs:
     mean_attention = mean_attention[0]
     fname = os.path.join(token_dir, "attn-head-mean" + ".png")
     plt.imsave(fname=fname, arr=mean_attention, format='png')
+    draw_bbox_in_img(fname, bbox_scaled, score, color=[0,0,255])
     print(f"{fname} saved.")
     attn = get_one_query_attn(vis_attn, h_featmap, w_featmap,nh)
     for j in range(nh):
@@ -237,6 +238,7 @@ for vis_index in vis_indexs:
         plt.imsave(fname=fname, arr=attn[j], format='png')
         draw_bbox_in_img(fname, bbox_scaled, score, color=[0,0,255])
         print(f"{fname} saved.")
+    
 
 path = os.listdir(args.output_dir)
 det_tok_dirs=[]
@@ -250,12 +252,12 @@ for p in path:
 # fig, axs = plt.subplots(constrained_layout=True, ncols=7, nrows=len(det_tok_dirs), figsize=(22, 7))
 for dettoken_dir in det_tok_dirs:
     fig = plt.figure(constrained_layout=True, figsize=(32 * 0.7, 5 * 0.7), facecolor='white')
-    gs = fig.add_gridspec(1, 4)
+    gs = fig.add_gridspec(1, 5)
     axs_0 = [
         fig.add_subplot(gs[0, 1]),
         fig.add_subplot(gs[0, 2]),
         fig.add_subplot(gs[0, 3]),
-        # fig.add_subplot(gs[0, 4]),
+        fig.add_subplot(gs[0, 4]),
         # fig.add_subplot(gs[0, 5]),
         # fig.add_subplot(gs[0, 6]),
     ]
@@ -264,21 +266,28 @@ for dettoken_dir in det_tok_dirs:
     #                   'attn-head3.png', 'attn-head4.png', 'attn-head5.png']
 
     # for tiny model num_head = 3
-    dettoken_heads = ['attn-head0.png', 'attn-head1.png', 'attn-head2.png']
+    dettoken_heads = ['attn-head0.png', 'attn-head1.png', 'attn-head2.png','attn-head-mean.png']
     dettoken_dir_files_0 = []
     for dettoken_head in dettoken_heads:
         dettoken_dir_files_0.append(os.path.join(dettoken_dir, dettoken_head))
     head_index=0
-    for dettoken_dir_file, head_ax in zip(dettoken_dir_files_0, axs_0):
+    for index, [dettoken_dir_file, head_ax] in enumerate(zip(dettoken_dir_files_0, axs_0)):
+        if index == 3:
+            break
         im = Image.open(dettoken_dir_file)
         head_ax.imshow(im)
         head_ax.set_title('%s-Head#%d' %(dettoken_dir.split('/')[-1], head_index))
         head_ax.axis('off')
         head_index = head_index+1
+    head_ax = axs_0[-1]
+    im = Image.open(dettoken_dir_files_0[-1])
+    head_ax.imshow(im)
+    head_ax.set_title('%s-Head-Mean' %(dettoken_dir.split('/')[-1]))
+    head_ax.axis('off')
     fleft_ax = fig.add_subplot(gs[0, 0])
     im = Image.open(os.path.join(args.output_dir, 'pred_img.png'))
     fleft_ax.imshow(im)
     fleft_ax.axis('off')
     fleft_ax.set_title('pred_img.png')
     fig.savefig(os.path.join(dettoken_dir, dettoken_dir.split('/')[-1]+'_'+'attn.png'), facecolor=fig.get_facecolor(), edgecolor='none', dpi=300)
-#     plt.close(fig)
+    plt.close(fig)

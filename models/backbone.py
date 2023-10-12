@@ -124,6 +124,7 @@ class ReuseEmbed(nn.Module):
         patch_dim_w, patch_dim_h = W//16, H//16
         all_indices = set(range(patch_dim_h * patch_dim_w))
         row = None
+        reuse_proportion = 0
         if reuse_embedding is not None or reuse_region is not None:
             for bbox in reuse_region:
                 x1, y1, x2, y2 = bbox
@@ -140,14 +141,15 @@ class ReuseEmbed(nn.Module):
                         all_indices.discard(patch_idx)
             drop_num = int(len(all_indices) * drop_proportion)
             row = np.random.choice(list(all_indices), size=drop_num, replace=False)
-
+            reuse_proportion = len(row)/len(set(range(patch_dim_h * patch_dim_w)))
         embeddings_to_save = self.proj(x)
         embeddings_to_save = embeddings_to_save.flatten(2)
         if reuse_embedding is not None and len(row) > 0:
             replace_embedding = reuse_embedding[:,:,row]
             embeddings_to_save[:,:,row] = replace_embedding
         embeddings = embeddings_to_save.transpose(1, 2)
-        return embeddings, embeddings_to_save
+        debug_data = {'reuse_proportion': reuse_proportion}
+        return embeddings, embeddings_to_save, debug_data
 
 class HybridEmbed(nn.Module):
     """ CNN Feature Map Embedding
@@ -445,13 +447,14 @@ class VisionTransformerTokenReuse(VisionTransformer):
                  num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
                  drop_path_rate=drop_path_rate, hybrid_backbone=hybrid_backbone, norm_layer=norm_layer, is_distill=is_distill)
         self.patch_embed = ReuseEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+        self.original_patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         
     def forward_features(self, x, reuse_embedding, reuse_region, drop_propotion):
         # import pdb;pdb.set_trace()
         B, H, W = x.shape[0], x.shape[2], x.shape[3]
         # if (H,W) != self.img_size:
         #     self.finetune = True
-        x, saved_embedding = self.patch_embed(x, reuse_embedding, reuse_region, drop_propotion)
+        x, saved_embedding,debug_data = self.patch_embed(x, reuse_embedding, reuse_region, drop_propotion)
         # interpolate init pe
         if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
             temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, img_size=(H,W))
@@ -483,15 +486,60 @@ class VisionTransformerTokenReuse(VisionTransformer):
 
         x = self.norm(x)
 
-        return x[:, -self.det_token_num:, :],saved_embedding
+        return x[:, -self.det_token_num:, :],saved_embedding,debug_data
     
-    def forward(self, x, reuse_embedding, reuse_region, drop_propotion, return_attention=False):
+
+    def forward_return_all_selfattention(self, x):
+        # import pdb;pdb.set_trace()
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+
+        # if (H,W) != self.img_size:
+        #     self.finetune = True
+
+        x = self.original_patch_embed(x)
+        # interpolate init pe
+        if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
+            temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, img_size=(H,W))
+        else:
+            temp_pos_embed = self.pos_embed
+        # interpolate mid pe
+        if self.has_mid_pe:
+            # temp_mid_pos_embed = []
+            if (self.mid_pos_embed.shape[2] - 1 - self.det_token_num) != x.shape[1]:
+                temp_mid_pos_embed = self.InterpolateMidPosEmbed(self.mid_pos_embed, img_size=(H,W))
+            else:
+                temp_mid_pos_embed = self.mid_pos_embed
+
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        det_token = self.det_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x, det_token), dim=1)
+        x = x + temp_pos_embed
+        x = self.pos_drop(x)
+        output = []
+        for i in range(len((self.blocks))):
+            if self.use_checkpoint:
+                x = checkpoint.checkpoint(self.blocks[i], x)    # saves mem, takes time
+            else:
+                x, attn = self.blocks[i](x, return_attention=True)
+
+            if i == len(self.blocks)-1:
+                output.append(attn)
+            if self.has_mid_pe:
+                if i < (self.depth - 1):
+                    x = x + temp_mid_pos_embed[i]
+
+        x = self.norm(x)
+
+        return output
+
+    def forward(self, x, reuse_embedding, reuse_region, drop_proportion, return_attention=False):
         if return_attention == True:
             # return self.forward_selfattention(x)
             return self.forward_return_all_selfattention(x)
         else:
-            x,saved_embedding = self.forward_features(x, reuse_embedding, reuse_region,drop_propotion)
-            return x, saved_embedding
+            x,saved_embedding,debug_data = self.forward_features(x, reuse_embedding, reuse_region, drop_proportion)
+            return x, saved_embedding, debug_data
 
 
 def _conv_filter(state_dict, patch_size=16):
