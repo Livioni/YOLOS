@@ -72,64 +72,13 @@ def create_subplots(n):
             
     return fig, axs, gs
 
-def visualize_det_token_attention(image_tensor,image_path,bbox_scaled_c,transform_bbox_c, attention_map,vis_indexs):
-    im = Image.open(image_path)
-    w_featmap = image_tensor.shape[3] // args.patch_size
-    h_featmap = image_tensor.shape[2] // args.patch_size
-
-    if len(bbox_scaled_c) <= 0:
-        return
-    fact = 16   
-    # here we create the canvas
-    idxs = []
-    raw_idxs = []
-    for bbox in transform_bbox_c:
-        xmin, ymin, xmax, ymax, p = bbox
-        y_center = int((xmin + xmax) / 2)
-        x_center = int((ymin + ymax) / 2)
-        idxs.append((x_center, y_center))
-
-    for bbox in bbox_scaled_c: 
-        xmin, ymin, xmax, ymax, p = bbox
-        y_center = int((xmin + xmax) / 2)
-        x_center = int((ymin + ymax) / 2)
-        raw_idxs.append((x_center, y_center))
-
-    fig, axs, gs = create_subplots(len(bbox_scaled_c))
-    for ind,[idx_o, ax] in enumerate(zip(idxs, axs)):
-        idx = (idx_o[0] // fact, idx_o[1] // fact)
-        vis_attn = attention_map[:,vis_indexs[ind],:]
-        attn = get_one_query_meanattn(vis_attn, h_featmap, w_featmap)[0]
-        ax.imshow(attn, cmap='cividis', interpolation='nearest')
-        x1 = transform_bbox_c[ind][0]
-        y1 = transform_bbox_c[ind][1]
-        x2 = transform_bbox_c[ind][2]
-        y2 = transform_bbox_c[ind][3]
-        ax.add_patch(patches.Rectangle((x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor='r', facecolor='none'))
-        ax.plot(idx[1], idx[0], 'ro', markersize=2)
-        ax.axis('off')
-        ax.set_title(f'self-attention{idx_o}')
-
-    fcenter_ax = fig.add_subplot(gs[:, 1:-1])
-    fcenter_ax.imshow(im)
-    for (y, x) in raw_idxs:
-        fcenter_ax.add_patch(plt.Circle((x,y), fact // 2, color='r'))
-        fcenter_ax.axis('off')
-    
-    for bbox in bbox_scaled_c: 
-        xmin, ymin, xmax, ymax, p = bbox
-        fcenter_ax.add_patch(patches.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, linewidth=1, edgecolor='r', facecolor='none'))
-    
-
-    plt.tight_layout()
-    save_image_name = image_path.split('/')[-1]
-    plt.savefig('results/MOT15_val_det_token_visualize/' + save_image_name, bbox_inches='tight', pad_inches=0, dpi=300)
-    plt.close()
-    return
-
-
 def get_one_query_meanattn(vis_attn,h_featmap,w_featmap):
     mean_attentions = vis_attn.mean(0).reshape(h_featmap, w_featmap)
+    mean_attentions = nn.functional.interpolate(mean_attentions.unsqueeze(0).unsqueeze(0), scale_factor=16, mode="nearest")[0].cpu().numpy()
+    return mean_attentions
+
+def get_one_query_sumattn(vis_attn,h_featmap,w_featmap):
+    mean_attentions = vis_attn.sum(0).reshape(h_featmap, w_featmap)
     mean_attentions = nn.functional.interpolate(mean_attentions.unsqueeze(0).unsqueeze(0), scale_factor=16, mode="nearest")[0].cpu().numpy()
     return mean_attentions
 
@@ -219,7 +168,7 @@ def attention_inference(model, image_path : str, args):
         idx = (idx_o[0], idx_o[1])
         vis_index = vis_indexs[ind]
         vis_attn = attention[:, vis_index, :]
-        mean_attention = get_one_query_meanattn(vis_attn, h_featmap, w_featmap)
+        mean_attention = get_one_query_sumattn(vis_attn, h_featmap, w_featmap)
         mean_attention = mean_attention[0]
         ax.imshow(mean_attention, cmap='cividis', interpolation='nearest')
         x1 = transform_bbox_c[ind][0]
@@ -244,7 +193,7 @@ def attention_inference(model, image_path : str, args):
 
     plt.tight_layout()
     save_image_name = image_path.split('/')[-1]
-    plt.savefig('results/MOT15_val_det_token_visualize/' + save_image_name, bbox_inches='tight', pad_inches=0, dpi=300)
+    plt.savefig('results/MOT15_val_mean_det_token/' + save_image_name, bbox_inches='tight', pad_inches=0, dpi=300)
     plt.close()
     return bbox_scaled_c,reference_image_id
 

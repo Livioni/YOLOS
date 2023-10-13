@@ -65,7 +65,6 @@ def val_dataset_preporcess(args):
             reuse_image_paths.append(os.path.join(args.vals_folder, reuse_file_name))
         else:
             continue
-
     return image_paths, reuse_image_paths
 
 def token_reuse_inference(model, image_path : str, reuse_image_path : str, args):
@@ -152,9 +151,7 @@ def main(args):
     image_id_pool = []
     reuse_propotion = []
     for image, reuse_image in tzip(image_paths,reuse_image_paths):
-        start_time = time()
         reference_bbox_c, reuse_bbox_c, reference_id, image_id, debug_data = token_reuse_inference(model,image,reuse_image,args)
-        end_time = time()
         reference_prediction.append(reference_bbox_c)
         reuse_prediction.append(reuse_bbox_c)
         reference_id_pool.append(reference_id)
