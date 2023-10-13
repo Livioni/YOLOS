@@ -17,5 +17,4 @@ output/
 .vscode
 inputs/
 visualization/exp
-results/MOT15_val_attention_visualize
-results/MOT15_val_det_token_visualize
+results/*/

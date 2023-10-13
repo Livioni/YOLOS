@@ -447,7 +447,6 @@ class VisionTransformerTokenReuse(VisionTransformer):
                  num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
                  drop_path_rate=drop_path_rate, hybrid_backbone=hybrid_backbone, norm_layer=norm_layer, is_distill=is_distill)
         self.patch_embed = ReuseEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
-        self.original_patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         
     def forward_features(self, x, reuse_embedding, reuse_region, drop_propotion):
         # import pdb;pdb.set_trace()
@@ -495,8 +494,9 @@ class VisionTransformerTokenReuse(VisionTransformer):
 
         # if (H,W) != self.img_size:
         #     self.finetune = True
-
-        x = self.original_patch_embed(x)
+        reuse_embedding = None
+        reuse_region = None
+        x,_,_ = self.patch_embed(x,reuse_embedding,reuse_region)
         # interpolate init pe
         if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
             temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, img_size=(H,W))

@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 sys.path.append('/home/livion/Documents/github/fork/YOLOS/') 
 import util.misc as utils
-from models.detector import ReuseDetector,Detector
+from models.detector import ReuseDetector
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -176,8 +176,9 @@ def detr_attention_inference(model, image_path : str, args):
     ###############reference_inference#########
     with torch.no_grad():
         reference_tensor = reference_tensor.to(args.device)
-        # outputs_reference, saved_embedding, _ = model(reference_tensor,reuse_embedding,reuse_region,args.drop_proportion)
-        outputs_reference = model(reference_tensor)
+        reuse_embedding = None
+        reuse_region = None
+        outputs_reference, saved_embedding, _ = model(reference_tensor,reuse_embedding,reuse_region,args.drop_proportion)
         attention = model.forward_return_attention(reference_tensor)
         attention = attention[-1].detach().cpu()
         nh = attention.shape[1] # number of head
@@ -221,7 +222,7 @@ def main(args):
     else:
         raise('dataset_file not supported')
         
-    model = Detector(
+    model = ReuseDetector(
         num_classes=args.num_class, #类别数91
         pre_trained= args.pre_trained, #pre_train模型pth文件
         det_token_num=args.det_token_num, #100个det token

@@ -14,7 +14,7 @@ import numpy as np
 from PIL import Image
 sys.path.append('/home/livion/Documents/github/fork/YOLOS/') 
 import util.misc as utils
-from models.detector import ReuseDetector,Detector
+from models.detector import ReuseDetector
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
@@ -183,10 +183,10 @@ def attention_inference(model, image_path : str, args):
     nh = attention.shape[1] # number of head
     attention = attention[0, :, -args.det_token_num:, 1:-args.det_token_num]
     #forward input to get pred
-    # reuse_embedding = None
-    # reuse_region = None
-    # result_dic, _, _ = model(reference_tensor,reuse_embedding,reuse_region,args.drop_proportion)
-    result_dic = model(reference_tensor)
+    reuse_embedding = None
+    reuse_region = None
+    result_dic, _, _ = model(reference_tensor,reuse_embedding,reuse_region,args.drop_proportion)
+    # result_dic = model(reference_tensor)
     probas = result_dic['pred_logits'].softmax(-1)[0, :, :-1].cpu()
     keep = probas.max(-1).values > 0.9
     sacled_bbox = rescale_bboxes(result_dic['pred_boxes'][0, keep],img.size)
@@ -274,7 +274,7 @@ def main(args):
     else:
         raise('dataset_file not supported')
         
-    model = Detector(
+    model = ReuseDetector(
         num_classes=args.num_class, #类别数91
         pre_trained= args.pre_trained, #pre_train模型pth文件
         det_token_num=args.det_token_num, #100个det token
