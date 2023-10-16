@@ -55,16 +55,25 @@ def val_dataset_preporcess(args):
     image_paths = []
     reuse_image_paths = []
     files = sorted(os.listdir(args.vals_folder))
-    for file in files:
+    cnt = 0
+    for index,file in enumerate(files):
         file_part = file.split('-')
         file_id = file_part[-1][0:-4]
-        reuse_frame_id = int(file_id) - args.max_reuse_frame
-        reuse_file_name = file[:-7] + str(reuse_frame_id) + '.jpg'
-        if os.path.exists(os.path.join(args.vals_folder, reuse_file_name)):
-            image_paths.append(os.path.join(args.vals_folder, file))
-            reuse_image_paths.append(os.path.join(args.vals_folder, reuse_file_name))
+        reuse_frame_id = int(file_id) - cnt
+        if reuse_frame_id >= 1000:
+            reuse_file_name = file[:-8] + str(reuse_frame_id) + '.jpg'
         else:
-            continue
+            reuse_file_name = file[:-7] + str(reuse_frame_id) + '.jpg'
+        reuse_frame_path = os.path.join(args.vals_folder,reuse_file_name)
+        image_paths.append(os.path.join(args.vals_folder,file))
+        if os.path.exists(reuse_frame_path):
+            reuse_image_paths.append(reuse_frame_path)
+            cnt += 1
+            if cnt == args.max_reuse_frame:
+                cnt = 0
+        else:
+            reuse_image_paths.append(os.path.join(args.vals_folder,file))
+            cnt = 0
     return image_paths, reuse_image_paths
 
 def token_reuse_inference(model, image_path : str, reuse_image_path : str, args):
@@ -75,8 +84,10 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, args)
     input_tensor = TRANSFORM(img).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
 
     # 将参考的图像的patch tokenized
-    image_name = reuse_image_path.split('/')[-1]
-    bboxes,reference_image_id = extract_bboxes_from_coco(args.vals_json, image_name) 
+    reuse_image_name = reuse_image_path.split('/')[-1]
+    val_image_name = image_path.split('/')[-1]
+    bboxes,reuse_image_id = extract_bboxes_from_coco(args.vals_json, reuse_image_name) 
+    _, image_id = extract_bboxes_from_coco(args.vals_json, val_image_name)
     ground_truth_bbox = [resize_bbox(bbox, reuse_image.size, reference_tensor.shape[-2:]) for bbox in bboxes]
     ###############reference_inference#########
     with torch.no_grad():
@@ -88,6 +99,7 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, args)
     keep_reference = probas_reference.max(-1).values > 0.9
     # convert boxes from [0; 1] to image scales
     bboxes_scaled_reference = rescale_bboxes(outputs_reference['pred_boxes'][0, keep_reference], img.size)
+    bboxex_feed_back = rescale_bboxes(outputs_reference['pred_boxes'][0, keep_reference], [input_tensor.shape[-1],input_tensor.shape[-2]])
     bboxes_scale_reference_add_confidence = torch.cat((bboxes_scaled_reference, probas_reference[keep_reference]), dim=1).tolist()
     ################drop_inference#############
     with torch.no_grad():
@@ -101,8 +113,7 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, args)
     # convert boxes from [0; 1] to image scales
     bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)
     bboxes_scaled_add_confidence = torch.cat((bboxes_scaled, probas[keep]), dim=1).tolist()
-    image_id = reference_image_id + args.max_reuse_frame
-    return bboxes_scale_reference_add_confidence, bboxes_scaled_add_confidence, reference_image_id, image_id, debug_data
+    return bboxes_scale_reference_add_confidence, bboxes_scaled_add_confidence, reuse_image_id, image_id, debug_data
 
 def main(args):
     # utils.init_distributed_mode(args)

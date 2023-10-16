@@ -71,7 +71,7 @@ def get_args_parser():
                         help='drop the non ROIpatch in the image')
     parser.add_argument('--token_reuse', default=True, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_porpotion', default=0.8, type=float,
+    parser.add_argument('--drop_porpotion', default=1.0, type=float,
                         help='the porpotion of the patch to drop')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
