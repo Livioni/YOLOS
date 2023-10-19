@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torchvision.transforms as transforms
 import util.misc as utils
-from models.detector import Detector
+from models.detector import DropDetector
 from einops import rearrange
 from util.video_preprocess import file_type
 import warnings
@@ -65,14 +65,10 @@ def get_args_parser():
                         help='use checkpoint.checkpoint to save mem')
     parser.add_argument('--num_class', default=1, type=int,
                         help='num of classes in the dataset')
-    parser.add_argument('--random_mask', default=False, action='store_true',
-                        help='random_mask the patch in the image')
-    parser.add_argument('--no_patch_mask', default=False, action='store_true',
-                        help='mask the non ROIpatch in the image')
-    parser.add_argument('--token_reuse', default=True, action='store_true',
+    parser.add_argument('--token_drop', default=True, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_porpotion', default=1.0, type=float,
-                        help='the porpotion of the patch to drop')
+    parser.add_argument('--drop_porpotion', default=0.1, type=float,
+                        help='the porpotion of the patch to mask')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
 
@@ -161,125 +157,23 @@ def rescale_bboxes(out_bbox, size):
     b = b * torch.tensor([img_w, img_h, img_w, img_h], dtype=torch.float32)
     return b
 
-# plot_results(img, probas[keep],probas_raw[keep_raw], bboxes_scaled,bboxes_scaled_raw, row)
-def plot_results(pil_img, prob,prob_raw, boxes,boxes_raw,row,backbone='base'):
-    fig, ax = plt.subplots(2, 2, figsize=(30, 20))
-    ax[0,0].imshow(pil_img)
-    ax[1,0].imshow(pil_img)
+def plot_results(image,prob,bboxes):
+    fig, ax = plt.subplots(1, figsize=(16, 8))
+    ax.imshow(image)
     colors = COLORS * 100
-    #左下的图是用原图推理的得到的结果
-    for p, (xmin, ymin, xmax, ymax), c in zip(prob_raw, boxes_raw.tolist(), colors):
-        ax[1,0].add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
+    #左的图是用原图推理的得到的结果
+    for p, (xmin, ymin, xmax, ymax), c in zip(prob, bboxes.tolist(), colors):
+        ax.add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
                                    fill=False, color=c, linewidth=3))
         cl = p.argmax()
         text = f'{MOT_CLASSES[cl]}: {p[cl]:0.2f}'
-        ax[1,0].text(xmin, ymin, text, fontsize=15,
+        ax.text(xmin, ymin, text, fontsize=15,
                 bbox=dict(facecolor='yellow', alpha=0.5))
 
-    ax[1,1].imshow(pil_img)
-    colors = COLORS * 100
-    #右下的图是用drop patch后的图推理的得到的结果
-    for p, (xmin, ymin, xmax, ymax), c in zip(prob, boxes.tolist(), colors):
-        ax[1,1].add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
-                                   fill=False, color=c, linewidth=3))
-        cl = p.argmax()
-        text = f'{MOT_CLASSES[cl]}: {p[cl]:0.2f}'
-        ax[1,1].text(xmin, ymin, text, fontsize=15,
-                bbox=dict(facecolor='yellow', alpha=0.5))
-    img_copy = plot_masked(pil_img,row,backbone=backbone)
-    ax[0,1].imshow(img_copy)
     plt.axis('off')
     plt.tight_layout()
     plt.savefig('results/'+'result.png')
-    # plt.show()
 
-def plot_results_reuse(pil_img, prob,prob_raw, boxes,boxes_raw,row, reuse,backbone='base'):
-    fig, ax = plt.subplots(2, 2, figsize=(30, 20))
-    ax[0,0].imshow(pil_img)
-    ax[1,0].imshow(pil_img)
-    colors = COLORS * 100
-    #左下的图是用原图推理的得到的结果
-    for p, (xmin, ymin, xmax, ymax), c in zip(prob_raw, boxes_raw.tolist(), colors):
-        ax[1,0].add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
-                                   fill=False, color=c, linewidth=3))
-        cl = p.argmax()
-        text = f'{MOT_CLASSES[cl]}: {p[cl]:0.2f}'
-        ax[1,0].text(xmin, ymin, text, fontsize=15,
-                bbox=dict(facecolor='yellow', alpha=0.5))
-
-    ax[1,1].imshow(pil_img)
-    colors = COLORS * 100
-    #右下的图是用drop patch后的图推理的得到的结果
-    for p, (xmin, ymin, xmax, ymax), c in zip(prob, boxes.tolist(), colors):
-        ax[1,1].add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
-                                   fill=False, color=c, linewidth=3))
-        cl = p.argmax()
-        text = f'{MOT_CLASSES[cl]}: {p[cl]:0.2f}'
-        ax[1,1].text(xmin, ymin, text, fontsize=15,
-                bbox=dict(facecolor='yellow', alpha=0.5))
-    img_copy = plot_masked_reuse(pil_img,row,reuse_image=reuse,backbone=backbone)
-    ax[0,1].imshow(img_copy)
-    plt.axis('off')
-    plt.tight_layout()
-    plt.savefig('results/'+'result.png')
-    # plt.show()
-
-def plot_masked_reuse(img,row,reuse_image,backbone='tiny'):
-    original_size = img.size
-    if backbone == 'tiny':
-        transformed_img = TRANSFORM_tiny.transforms[0](img)
-        transformed_img = TRANSFORM_tiny.transforms[1](transformed_img)
-        transformed_img_reuse = TRANSFORM_tiny.transforms[0](reuse_image)
-        transformed_img_reuse = TRANSFORM_tiny.transforms[1](transformed_img_reuse)
-
-    else:
-        transformed_img = TRANSFORM_base.transforms[0](img)
-        transformed_img = TRANSFORM_base.transforms[1](transformed_img)
-        transformed_img_reuse = TRANSFORM_base.transforms[0](reuse_image)
-        transformed_img_reuse = TRANSFORM_base.transforms[1](transformed_img_reuse)
-
-    patch_dim_w, patch_dim_h = transformed_img.shape[2] // 16, transformed_img.shape[1] // 16
-    img_copy = rearrange(transformed_img, 'c (h p1) (w p2) -> (h w) (p1 p2 c)', p1=16, p2=16)
-    img_copy[row, :] = 0.0
-    img_copy = rearrange(img_copy, '(h w) (p1 p2 c) -> c (h p1) (w p2)',p1=16, p2=16,h=patch_dim_h,w=patch_dim_w)
-
-    ref_tensor_patches = rearrange(transformed_img_reuse, 'c (h p1) (w p2) -> (h w) (p1 p2 c)', p1=16, p2=16)
-            
-    # 使用row中的索引从ref_tensor_patches中选取patches
-    replacement_patches = ref_tensor_patches[row, :]
-
-    # 将input_tensor重新整形为patch形式
-    input_tensor_patches = rearrange(transformed_img, 'c (h p1) (w p2) -> (h w) (p1 p2 c)', p1=16, p2=16)
-    
-    # 使用replacement_patches替换input_tensor_patches中的patches
-    input_tensor_patches[row, :] = replacement_patches
-
-    # 将input_tensor_patches重新整形回原始尺寸
-    img_copy = rearrange(input_tensor_patches, '(h w) (p1 p2 c) -> c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
-
-    resize = transforms.Resize((original_size[1],original_size[0]))
-    img_copy = resize(img_copy)
-    #tensor to PIL
-    img_copy = transforms.ToPILImage()(img_copy)
-    return img_copy
-
-def plot_masked(img,row,backbone='tiny'):
-    original_size = img.size
-    if backbone == 'tiny':
-        transformed_img = TRANSFORM_tiny.transforms[0](img)
-        transformed_img = TRANSFORM_tiny.transforms[1](transformed_img)
-    else:
-        transformed_img = TRANSFORM_base.transforms[0](img)
-        transformed_img = TRANSFORM_base.transforms[1](transformed_img)
-    patch_dim_w, patch_dim_h = transformed_img.shape[2] // 16, transformed_img.shape[1] // 16
-    img_copy = rearrange(transformed_img, 'c (h p1) (w p2) -> (h w) (p1 p2 c)', p1=16, p2=16)
-    img_copy[row, :] = 0.0
-    img_copy = rearrange(img_copy, '(h w) (p1 p2 c) -> c (h p1) (w p2)',p1=16, p2=16,h=patch_dim_h,w=patch_dim_w)
-    resize = transforms.Resize((original_size[1],original_size[0]))
-    img_copy = resize(img_copy)
-    #tensor to PIL
-    img_copy = transforms.ToPILImage()(img_copy)
-    return img_copy
 
 def main(args, init_pe_size, mid_pe_size, resume):
     # utils.init_distributed_mode(args)
@@ -293,7 +187,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
     np.random.seed(seed)
     random.seed(seed)
 
-    model = Detector(
+    model = DropDetector(
         num_classes=args.num_class, #类别数91
         pre_trained= args.pre_trained, #pre_train模型pth文件
         det_token_num=args.det_token_num, #100个det token
@@ -339,67 +233,16 @@ def main(args, init_pe_size, mid_pe_size, resume):
                     patch_idx = i * patch_dim_w + j
                     all_indices.discard(patch_idx)
 
-        if args.random_mask:
-            drop_num = int(patch_num * args.drop_porpotion)
-            input_tensor = rearrange(input_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
-            row = np.random.choice(range(patch_num), size=drop_num, replace=False)
-            input_tensor[:, row, :] = 0.0
-            input_tensor = rearrange(input_tensor, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)',p1=16, p2=16,h=patch_dim_h,w=patch_dim_w)
-
-
-        if args.no_patch_mask:
-            # 假设有一个bounding boxes的列表，其中每个bounding box的格式是：bbox = [x1, y1, x2, y2]
-            drop_num = int(len(all_indices) * args.drop_porpotion)
-            # 从除所有bounding boxes外的patches中随机选择要drop的patches
-            row = np.random.choice(list(all_indices), size=drop_num, replace=False)
+        if args.token_drop:
+            mask_num = int(len(all_indices) * args.drop_porpotion)
+            # 从除所有bounding boxes外的patches中随机选择要mask的patches
+            row = np.random.choice(list(all_indices), size=mask_num, replace=False)
             
-            input_tensor = rearrange(input_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
-            input_tensor[:, row, :] = 0.0
-            input_tensor = rearrange(input_tensor, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
-
-
-        if args.token_reuse:
-            drop_num = int(len(all_indices) * args.drop_porpotion)
-            # 从除所有bounding boxes外的patches中随机选择要drop的patches
-            row = np.random.choice(list(all_indices), size=drop_num, replace=False)
-            
-            input_tensor = rearrange(input_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
-            input_tensor[:, row, :] = 0.0
-            input_tensor = rearrange(input_tensor, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
-            # 假设你有一个ref_tensor与input_tensor尺寸相同
-            reuse_image = Image.open(args.reuse_image)
-
-            ref_tensor = TRANSFORM(reuse_image).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
-
-            # 将ref_tensor重新整形为patch形式
-            ref_tensor_patches = rearrange(ref_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
-            
-            # 使用row中的索引从ref_tensor_patches中选取patches
-            replacement_patches = ref_tensor_patches[:, row, :]
-
-            # 将input_tensor重新整形为patch形式
-            input_tensor_patches = rearrange(input_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
-            
-            # 使用replacement_patches替换input_tensor_patches中的patches
-            input_tensor_patches[:, row, :] = replacement_patches
-
-            # 将input_tensor_patches重新整形回原始尺寸
-            input_tensor = rearrange(input_tensor_patches, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
-
-        ###############raw_inference#########
-        with torch.no_grad():
-            original_img = original_img.to(device)
-            outputs_raw = model(original_img)
-        probas_raw = outputs_raw['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
-        keep_raw = probas_raw.max(-1).values > 0.9
-        # convert boxes from [0; 1] to image scales
-        bboxes_scaled_raw = rescale_bboxes(outputs_raw['pred_boxes'][0, keep_raw], img.size)
-
         start_time = time()
-        ###############drop_inference#########
+        ###############mask_inference#########
         with torch.no_grad():
             input_tensor = input_tensor.to(device)
-            outputs = model(input_tensor)
+            outputs = model(input_tensor,row)
         end_time = time()
         print(f'Inference Time:{end_time-start_time:.3f}s.')
 
@@ -410,15 +253,11 @@ def main(args, init_pe_size, mid_pe_size, resume):
         bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)
 
         if args.output_dir != '':
-            if args.token_reuse:
-                plot_results_reuse(img, probas[keep],probas_raw[keep_raw], bboxes_scaled, bboxes_scaled_raw, row, reuse_image, backbone=args.backbone_name)
-            else:
-                plot_results(img, probas[keep],probas_raw[keep_raw], bboxes_scaled, bboxes_scaled_raw, row, backbone=args.backbone_name)
-        
-            
+            if args.token_drop:
+                plot_results(img, probas[keep], bboxes_scaled)
+
         # 加载Ground Truth数据
         bboxes_scaled_add_confidence = torch.cat((bboxes_scaled, probas[keep]), dim=1)
-        bboxes_scale_raw_add_confidence = torch.cat((bboxes_scaled_raw, probas_raw[keep_raw]), dim=1).tolist()
         # 转换检测结果到COCO格式
         image_id = 139  # 根据你的数据设置
         coco_detections = [

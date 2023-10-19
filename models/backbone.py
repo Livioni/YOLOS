@@ -102,19 +102,11 @@ class PatchEmbed(nn.Module):
         embeddings = self.proj(x).flatten(2).transpose(1, 2)
         return embeddings
 
-class ReuseEmbed(nn.Module):
+class ReuseEmbed(PatchEmbed):
     """ Image to Patch Embedding
     """
     def __init__(self, img_size=[512,864], patch_size=16, in_chans=3, embed_dim=384):
-        super().__init__()
-        img_size = to_2tuple(img_size)
-        patch_size = to_2tuple(patch_size)
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.num_patches = num_patches
-
-        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        super().__init__(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
 
     def forward(self, x, reuse_embedding, reuse_region, drop_proportion=0.1):
         B, C, H, W = x.shape
@@ -150,6 +142,24 @@ class ReuseEmbed(nn.Module):
         embeddings = embeddings_to_save.transpose(1, 2)
         debug_data = {'reuse_proportion': reuse_proportion}
         return embeddings, embeddings_to_save, debug_data
+
+class DropEmbed(PatchEmbed):
+    def __init__(self, img_size=[512, 864], patch_size=16, in_chans=3, embed_dim=384):
+        super().__init__(img_size, patch_size, in_chans, embed_dim)
+    
+    def forward(self, x, row):
+        B, C, H, W = x.shape
+        x1 = self.proj(x).flatten(2)
+
+        # 创建一个包含所有索引的array，然后取补集
+        all_indices = np.arange(x1.size(2))
+        indices_to_keep = torch.tensor(np.setdiff1d(all_indices, row)).to("cuda")
+
+        # 使用index_select来选择希望保留的索引
+        x2 = x1.index_select(2, indices_to_keep)
+
+        embeddings = x2.transpose(1, 2)
+        return embeddings
 
 class HybridEmbed(nn.Module):
     """ CNN Feature Map Embedding
@@ -239,8 +249,6 @@ class VisionTransformer(nn.Module):
         trunc_normal_(self.pos_embed, std=.02)
         trunc_normal_(self.cls_token, std=.02)
         self.apply(self._init_weights)
-
-
 
         # set finetune flag
         self.has_mid_pe = False
@@ -428,7 +436,6 @@ class VisionTransformer(nn.Module):
 
         return output
 
-
     def forward(self, x, return_attention=False):
         if return_attention == True:
             # return self.forward_selfattention(x)
@@ -487,7 +494,6 @@ class VisionTransformerTokenReuse(VisionTransformer):
 
         return x[:, -self.det_token_num:, :],saved_embedding,debug_data
     
-
     def forward_return_all_selfattention(self, x):
         # import pdb;pdb.set_trace()
         B, H, W = x.shape[0], x.shape[2], x.shape[3]
@@ -542,6 +548,95 @@ class VisionTransformerTokenReuse(VisionTransformer):
             return x, saved_embedding, debug_data
 
 
+class VisionTransformerPatchDrop(VisionTransformer):
+    """ Vision Transformer with support for patch or hybrid CNN input stage
+    """
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
+                 num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
+                 drop_path_rate=0., hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False):
+        super().__init__(img_size=img_size, patch_size=patch_size, in_chans=in_chans, num_classes=num_classes, embed_dim=embed_dim, depth=depth,
+                 num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
+                 drop_path_rate=drop_path_rate, hybrid_backbone=hybrid_backbone, norm_layer=norm_layer, is_distill=is_distill)
+        self.patch_embed = DropEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
+
+    def InterpolateInitPosEmbed(self, pos_embed, img_size=(800, 1344),row=[]):
+        # import pdb;pdb.set_trace()
+        cls_pos_embed = pos_embed[:, 0, :]
+        cls_pos_embed = cls_pos_embed[:,None]
+        det_pos_embed = pos_embed[:, -self.det_token_num:,:]
+        patch_pos_embed = pos_embed[:, 1:-self.det_token_num, :]
+        patch_pos_embed = patch_pos_embed.transpose(1,2)
+        B, E, Q = patch_pos_embed.shape
+
+
+        P_H, P_W = self.img_size[0] // self.patch_size, self.img_size[1] // self.patch_size
+        patch_pos_embed = patch_pos_embed.view(B, E, P_H, P_W)
+
+        # P_H, P_W = self.img_size[0] // self.patch_size, self.img_size[1] // self.patch_size
+        # patch_pos_embed = patch_pos_embed.view(B, E, P_H, P_W)
+
+        H, W = img_size
+        new_P_H, new_P_W = H//self.patch_size, W//self.patch_size
+        patch_pos_embed = nn.functional.interpolate(patch_pos_embed, size=(new_P_H,new_P_W), mode='bicubic', align_corners=False)
+        patch_pos_embed = patch_pos_embed.flatten(2)
+        # 创建一个包含所有索引的array，然后取补集
+        all_indices = np.arange(patch_pos_embed.size(2))
+        indices_to_keep = torch.tensor(np.setdiff1d(all_indices, row)).to("cuda")
+
+        # 使用index_select来选择希望保留的索引
+        patch_pos_embed = patch_pos_embed.index_select(2, indices_to_keep)
+
+        patch_pos_embed = patch_pos_embed.transpose(1, 2)
+
+        scale_pos_embed = torch.cat((cls_pos_embed, patch_pos_embed, det_pos_embed), dim=1)
+        return scale_pos_embed
+
+    def forward_features(self, x, row):
+        # import pdb;pdb.set_trace()
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+        # if (H,W) != self.img_size:
+        #     self.finetune = True
+        x = self.patch_embed(x, row)
+        # interpolate init pe
+        if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
+            temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, img_size=(H,W), row=row)
+        else:
+            temp_pos_embed = self.pos_embed
+        # interpolate mid pe
+        if self.has_mid_pe:
+            # temp_mid_pos_embed = []
+            if (self.mid_pos_embed.shape[2] - 1 - self.det_token_num) != x.shape[1]:
+                temp_mid_pos_embed = self.InterpolateMidPosEmbed(self.mid_pos_embed, img_size=(H,W))
+            else:
+                temp_mid_pos_embed = self.mid_pos_embed
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        det_token = self.det_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x, det_token), dim=1)
+        x = x + temp_pos_embed
+        x = self.pos_drop(x)
+
+        for i in range(len((self.blocks))):
+            if self.use_checkpoint:
+                x = checkpoint.checkpoint(self.blocks[i], x)    # saves mem, takes time
+            else:
+                x = self.blocks[i](x)
+            if self.has_mid_pe:
+                if i < (self.depth - 1):
+                    x = x + temp_mid_pos_embed[i]
+
+        x = self.norm(x)
+
+        return x[:, -self.det_token_num:, :]
+    
+    def forward(self, x, row, return_attention=False):
+        if return_attention == True:
+            # return self.forward_selfattention(x)
+            return self.forward_return_all_selfattention(x)
+        else:
+            x = self.forward_features(x,row)
+            return x
+
 def _conv_filter(state_dict, patch_size=16):
     """ convert patch embedding weight from manual patchify + linear proj to conv"""
     out_dict = {}
@@ -553,6 +648,20 @@ def _conv_filter(state_dict, patch_size=16):
 
 def reuse_tiny(pretrained=None, **kwargs):
     model = VisionTransformerTokenReuse(
+                patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6))
+    if pretrained: 
+        # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_tiny_patch16_224-a1311bcf.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 192
+
+def droptiny(pretrained=None, **kwargs):
+    model = VisionTransformerPatchDrop(
                 patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
                 norm_layer=partial(nn.LayerNorm, eps=1e-6))
     if pretrained: 
@@ -609,6 +718,20 @@ def small_dWr(pretrained=None, **kwargs):
 
 def base(pretrained=None, **kwargs):
     model = VisionTransformer(
+        img_size=384, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),is_distill=True, **kwargs)
+    if pretrained:
+        # checkpoint = torch.load('deit_base_distilled_patch16_384-d0272ac0.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_base_distilled_patch16_384-d0272ac0.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 768
+
+def dropbase(pretrained=None, **kwargs):
+    model = VisionTransformerPatchDrop(
         img_size=384, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),is_distill=True, **kwargs)
     if pretrained:

@@ -1,0 +1,9 @@
+# Usage
+## List
+- **patch_reuse.py**: 使用（选择）base帧和当前帧，提取base帧的真值信息，当前帧reuse base frame 一定比例的patch。还包括patc_mask功能 随机mask和非ROI mask
+
+- **patch_reuse_evaluate.py**: 同patch_reuse.py 测试整个测试集在reuse patch情况下准确度的变化。base frame 和current frame 设置为 current frame reuse X 帧之前的 base frame。
+- **token_reuse_evaluate.py**: --max_reuse_frame 表示在X帧内，后X-1帧 reuse最开始一帧的patchs。测试整个测试集的精度变化。
+- **tools/det_token_attention_bbox.py**: 使用YOLOS文章中的技巧，可视化置信度大于阈值的det_tokens的self-attention热力图。
+- **tools/detr_attenton_visualizer.py**: 使用detr文章的技巧，可视化encoder中最后一层的self-attention，并以bboxes框中心作为索引值（reference point）可视化当前的热力图。
+- **patch_drop.py**: 直接丢弃（不是mask）一定比例的非ROI区域的patch。
