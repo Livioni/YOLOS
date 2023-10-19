@@ -42,7 +42,7 @@ def get_args_parser():
                         help="Number of det token in the deit backbone")
     parser.add_argument("--max_reuse_frame", default=0, type=int,
                         help="reuse frame interval")
-    parser.add_argument('--backbone_name', default='tiny', type=str,
+    parser.add_argument('--backbone_name', default='base', type=str,
                         help="Name of the deit backbone to use")
     parser.add_argument('--pre_trained', default='',
                         help="set imagenet pretrained model path if not train yolos from scatch")
@@ -193,7 +193,12 @@ def attention_inference(model, image_path : str, args):
 
     plt.tight_layout()
     save_image_name = image_path.split('/')[-1]
-    plt.savefig('results/MOT15_val_mean_det_token/' + save_image_name, bbox_inches='tight', pad_inches=0, dpi=300)
+    if args.backbone_name == 'base':
+        plt.savefig('results/YOLOS_base/MOT15_val_mean_det_token/' + save_image_name, bbox_inches='tight', pad_inches=0, dpi=300)
+    elif args.backbone_name == 'tiny':
+        plt.savefig('results/YOLOS_tiny/MOT15_val_mean_det_token/' + save_image_name, bbox_inches='tight', pad_inches=0, dpi=300)
+    else:
+        raise('backbone not supported')
     plt.close()
     return bbox_scaled_c,reference_image_id
 
@@ -213,7 +218,7 @@ def main(args):
         if args.backbone_name == 'base':
             init_pe_size = [800,1344]
             mid_pe_size = [800,1344]
-            resume = 'results/MOT17Det_base/checkpoint.pth'
+            resume = 'results/MOT15Det_base/checkpoint0199.pth'
         elif args.backbone_name == 'tiny':
             init_pe_size = [800, 1333]
             mid_pe_size = None

@@ -76,7 +76,7 @@ class ReuseDetector(nn.Module):
         elif backbone_name == 'small':
             self.backbone, hidden_dim = small(pretrained=pre_trained)
         elif backbone_name == 'base':
-            self.backbone, hidden_dim = base(pretrained=pre_trained)
+            self.backbone, hidden_dim = reuse_base(pretrained=pre_trained)
         elif backbone_name == 'small_dWr':
             self.backbone, hidden_dim = small_dWr(pretrained=pre_trained)
         else:
