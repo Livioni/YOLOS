@@ -68,11 +68,11 @@ def get_args_parser():
     parser.add_argument('--random_mask', default=False, action='store_true',
                         help='random_mask the patch in the image')
     parser.add_argument('--no_patch_mask', default=False, action='store_true',
-                        help='mask the non ROIpatch in the image')
+                        help='mask the non ROI patch in the image')
     parser.add_argument('--token_reuse', default=True, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_porpotion', default=1.0, type=float,
-                        help='the porpotion of the patch to drop')
+    parser.add_argument('--drop_proportion', default=1.0, type=float,
+                        help='the proportion of the patch to drop')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
 
@@ -83,7 +83,7 @@ def get_args_parser():
     parser.add_argument('--backbone_name', default='tiny', type=str,
                         help="Name of the deit backbone to use")
     parser.add_argument('--pre_trained', default='',
-                        help="set imagenet pretrained model path if not train yolos from scatch")
+                        help="set imagenet pretrained model path if not train yolos from scratch")
 
     # dataset parameters
     parser.add_argument('--output_dir', default='results',
@@ -340,7 +340,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
                     all_indices.discard(patch_idx)
 
         if args.random_mask:
-            drop_num = int(patch_num * args.drop_porpotion)
+            drop_num = int(patch_num * args.drop_proportion)
             input_tensor = rearrange(input_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
             row = np.random.choice(range(patch_num), size=drop_num, replace=False)
             input_tensor[:, row, :] = 0.0
@@ -349,7 +349,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
 
         if args.no_patch_mask:
             # 假设有一个bounding boxes的列表，其中每个bounding box的格式是：bbox = [x1, y1, x2, y2]
-            drop_num = int(len(all_indices) * args.drop_porpotion)
+            drop_num = int(len(all_indices) * args.drop_proportion)
             # 从除所有bounding boxes外的patches中随机选择要drop的patches
             row = np.random.choice(list(all_indices), size=drop_num, replace=False)
             
@@ -359,7 +359,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
 
 
         if args.token_reuse:
-            drop_num = int(len(all_indices) * args.drop_porpotion)
+            drop_num = int(len(all_indices) * args.drop_proportion)
             # 从除所有bounding boxes外的patches中随机选择要drop的patches
             row = np.random.choice(list(all_indices), size=drop_num, replace=False)
             

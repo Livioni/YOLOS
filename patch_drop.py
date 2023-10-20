@@ -67,8 +67,8 @@ def get_args_parser():
                         help='num of classes in the dataset')
     parser.add_argument('--token_drop', default=True, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_porpotion', default=0.1, type=float,
-                        help='the porpotion of the patch to mask')
+    parser.add_argument('--drop_proportion', default=0.1, type=float,
+                        help='the proportion of the patch to mask')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
 
@@ -234,7 +234,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
                     all_indices.discard(patch_idx)
 
         if args.token_drop:
-            mask_num = int(len(all_indices) * args.drop_porpotion)
+            mask_num = int(len(all_indices) * args.drop_proportion)
             # 从除所有bounding boxes外的patches中随机选择要mask的patches
             row = np.random.choice(list(all_indices), size=mask_num, replace=False)
             

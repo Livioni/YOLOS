@@ -28,8 +28,8 @@ def get_args_parser():
                         help='drop the non ROIpatch in the image')
     parser.add_argument('--token_reuse', default=True, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_porpotion', default=0.0, type=float,
-                        help='the porpotion of the patch to drop')
+    parser.add_argument('--drop_proportion', default=0.0, type=float,
+                        help='the proportion of the patch to drop')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
     parser.add_argument('--vals_folder', default='/home/livion/Documents/github/dataset/MOT15_coco/val', type=str,
@@ -106,7 +106,7 @@ def token_reuse_inference(model, image_path : str, reuse_image_path : str, args)
                 patch_idx = i * patch_dim_w + j
                 all_indices.discard(patch_idx)
 
-    drop_num = int(len(all_indices) * args.drop_porpotion)
+    drop_num = int(len(all_indices) * args.drop_proportion)
     # 从除所有bounding boxes外的patches中随机选择要drop的patches
     row = np.random.choice(list(all_indices), size=drop_num, replace=False)
     # 假设你有一个ref_tensor与input_tensor尺寸相同
