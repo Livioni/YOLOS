@@ -6,4 +6,4 @@
 - **token_reuse_evaluate.py**: --max_reuse_frame 表示在X帧内，后X-1帧 reuse最开始一帧的patchs。测试整个测试集的精度变化。
 - **tools/det_token_attention_bbox.py**: 使用YOLOS文章中的技巧，可视化置信度大于阈值的det_tokens的self-attention热力图。
 - **tools/detr_attenton_visualizer.py**: 使用detr文章的技巧，可视化encoder中最后一层的self-attention，并以bboxes框中心作为索引值（reference point）可视化当前的热力图。
-- **patch_drop.py**: 直接丢弃（不是mask）一定比例的非ROI区域的patch。
+- **patch_drop.py**: 直接丢弃（不是mask）一定比例的非ROI区域的patch，ROI由真值提供。

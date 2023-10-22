@@ -67,7 +67,7 @@ def get_args_parser():
                         help='num of classes in the dataset')
     parser.add_argument('--token_drop', default=True, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_proportion', default=0.1, type=float,
+    parser.add_argument('--drop_proportion', default=0.5, type=float,
                         help='the proportion of the patch to mask')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
@@ -79,7 +79,7 @@ def get_args_parser():
     parser.add_argument('--backbone_name', default='tiny', type=str,
                         help="Name of the deit backbone to use")
     parser.add_argument('--pre_trained', default='',
-                        help="set imagenet pretrained model path if not train yolos from scatch")
+                        help="set imagenet pretrained model path if not train yolos from scratch")
 
     # dataset parameters
     parser.add_argument('--output_dir', default='results',
@@ -157,23 +157,48 @@ def rescale_bboxes(out_bbox, size):
     b = b * torch.tensor([img_w, img_h, img_w, img_h], dtype=torch.float32)
     return b
 
-def plot_results(image,prob,bboxes):
-    fig, ax = plt.subplots(1, figsize=(16, 8))
-    ax.imshow(image)
+def plot_masked_reuse(img,row,backbone='tiny'):
+    original_size = img.size
+    if backbone == 'tiny':
+        transformed_img = TRANSFORM_tiny.transforms[0](img)
+        transformed_img = TRANSFORM_tiny.transforms[1](transformed_img)
+
+    else:
+        transformed_img = TRANSFORM_base.transforms[0](img)
+        transformed_img = TRANSFORM_base.transforms[1](transformed_img)
+
+    patch_dim_w, patch_dim_h = transformed_img.shape[2] // 16, transformed_img.shape[1] // 16
+    img_copy = rearrange(transformed_img, 'c (h p1) (w p2) -> (h w) (p1 p2 c)', p1=16, p2=16)
+    img_copy[row, :] = 0.0
+    img_copy = rearrange(img_copy, '(h w) (p1 p2 c) -> c (h p1) (w p2)',p1=16, p2=16,h=patch_dim_h,w=patch_dim_w)
+
+    resize = transforms.Resize((original_size[1],original_size[0]))
+    img_copy = resize(img_copy)
+    #tensor to PIL
+    img_copy = transforms.ToPILImage()(img_copy)
+    return img_copy
+
+def plot_results(image,prob,bboxes,row):
+    fig, [ax1,ax2] = plt.subplots(1,2, figsize=(20, 8))
+    ############left figure############
+    patch_drop_image = plot_masked_reuse(image,row)
+    ax1.imshow(patch_drop_image)
+    ax1.axis('off')
+    ############right figure############
+    ax2.imshow(image)
     colors = COLORS * 100
     #左的图是用原图推理的得到的结果
     for p, (xmin, ymin, xmax, ymax), c in zip(prob, bboxes.tolist(), colors):
-        ax.add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
+        ax2.add_patch(plt.Rectangle((xmin, ymin), xmax - xmin, ymax - ymin,
                                    fill=False, color=c, linewidth=3))
         cl = p.argmax()
         text = f'{MOT_CLASSES[cl]}: {p[cl]:0.2f}'
-        ax.text(xmin, ymin, text, fontsize=15,
+        ax2.text(xmin, ymin, text, fontsize=15,
                 bbox=dict(facecolor='yellow', alpha=0.5))
+    ax2.axis('off')
 
-    plt.axis('off')
     plt.tight_layout()
     plt.savefig('results/'+'result.png')
-
 
 def main(args, init_pe_size, mid_pe_size, resume):
     # utils.init_distributed_mode(args)
@@ -254,7 +279,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
 
         if args.output_dir != '':
             if args.token_drop:
-                plot_results(img, probas[keep], bboxes_scaled)
+                plot_results(img, probas[keep], bboxes_scaled, row)
 
         # 加载Ground Truth数据
         bboxes_scaled_add_confidence = torch.cat((bboxes_scaled, probas[keep]), dim=1)
