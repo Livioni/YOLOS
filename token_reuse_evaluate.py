@@ -1,19 +1,15 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import torch,warnings,argparse,random,os
-from tqdm import tqdm
 from tqdm.contrib import tzip
-from time import time
 from pathlib import Path
 from torch.utils.data import DataLoader
-from einops import rearrange
-from PIL import Image
 import numpy as np
-from tools.patch_reuse_tools import rescale_bboxes
+from tools.patch_reuse_tools import rescale_bboxes,box_cxcywh_to_xyxy
 import util.misc as utils
-from models.detector import ReuseDetector,PostProcess,Detector
+from models.detector import ReuseDetector,PostProcess
 from datasets import build_dataset, get_coco_api_from_dataset
 from datasets.coco_eval import CocoEvaluator
-import datasets.transforms as T
+
 
 # 忽略UserWarning
 warnings.simplefilter(action='ignore', category=UserWarning)
@@ -31,8 +27,6 @@ def get_args_parser():
                         help='the dataset to train on')
     parser.add_argument('--vals_folder', default='/home/livion/Documents/github/dataset/MOT15_coco/val', type=str,
                         help='the folder of the validation set')
-    parser.add_argument('--vals_json', default='/home/livion/Documents/github/dataset/MOT15_coco/annotations/MOT15_instances_vals.json', type=str,
-                        help='the json file of the validation set')
     parser.add_argument('--coco_path', type=str)
     parser.add_argument('--eval_size', default=512, type=int,
                         help='the size of the validation set')
@@ -45,7 +39,7 @@ def get_args_parser():
     parser.add_argument('--backbone_name', default='tiny', type=str,
                         help="Name of the deit backbone to use")
     parser.add_argument('--pre_trained', default='',
-                        help="set imagenet pretrained model path if not train yolos from scatch")
+                        help="set imagenet pretrained model path if not train yolos from scratch")
 
     # dataset parameters
     parser.add_argument('--output_dir', default='results',
@@ -83,9 +77,13 @@ def val_dataset_preporcess(args):
             cnt = 0
     return image_paths, reuse_image_paths
 
-def token_reuse_inference(model,image_tensor,reuse_image_tensor,args):
+def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
+                          target_reuse,args):
     image_tensor = image_tensor.unsqueeze(0)
     reuse_image_tensor = reuse_image_tensor.unsqueeze(0)
+    bboxes = target['boxes']
+    bboxes = box_cxcywh_to_xyxy(bboxes)
+    ground_truth_bboxes = rescale_bboxes(torch.tensor(bboxes), [image_tensor.shape[-1],image_tensor.shape[-2]]).tolist()
     ###############reference_inference#########
     with torch.no_grad():
         reuse_embedding = None
@@ -99,7 +97,7 @@ def token_reuse_inference(model,image_tensor,reuse_image_tensor,args):
     ################drop_inference#############
     with torch.no_grad():
         reuse_embedding = saved_embedding
-        reuse_region = bboxes_feed_back
+        reuse_region = ground_truth_bboxes
         input_tensor = image_tensor.to(args.device)
         outputs,_,debug_data = model(input_tensor,reuse_embedding,reuse_region,args.drop_proportion)
 
@@ -164,17 +162,12 @@ def main(args):
         image_tensor, target = dataset_val[index]
         reuse_index = files.index(reuse_image.split('/')[-1])
         reuse_image_tensor, target_reuse = dataset_val[reuse_index]
-        outputs, debug_data = token_reuse_inference(model,image_tensor,reuse_image_tensor,args)
+        outputs, debug_data = token_reuse_inference(model,image_tensor,target,\
+                                                    reuse_image_tensor,target_reuse,args)
         orig_target_sizes = torch.stack([target["orig_size"]], dim=0).to(args.device)
         results = postprocessors['bbox'](outputs, orig_target_sizes)
         res = {target['image_id'].item(): results[0]}
         coco_evaluator.update(res)
-        ################visualization#############
-        # visualization(image_path=image,\
-        #           reuse_image_path=reuse_image,\
-        #           reuse_image_bbox=reference_bbox_c,\
-        #           prediction_result=reuse_bbox_c,\
-        #           output_dir=args.output_dir)
         reuse_propotion.append(debug_data['reuse_proportion'])
 
     coco_evaluator.synchronize_between_processes()

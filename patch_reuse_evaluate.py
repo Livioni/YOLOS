@@ -1,16 +1,15 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-import torch,warnings,argparse,copy,random,os
-from time import time
+import torch,warnings,argparse,random,os,copy
 from tqdm.contrib import tzip
 from pathlib import Path
-from PIL import Image
 import numpy as np
-from tools.patch_reuse_tools import TRANSFORM_tiny, TRANSFORM_base, MOT_CLASSES, COLORS, extract_bboxes_from_coco, rescale_bboxes, detections_to_cocojson, detections_to_coco_format
+from tools.patch_reuse_tools import rescale_bboxes,box_cxcywh_to_xyxy
 import util.misc as utils
-from models.detector import Detector
 from einops import rearrange
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
+from models.detector import PostProcess,Detector
+from datasets import build_dataset, get_coco_api_from_dataset
+from datasets.coco_eval import CocoEvaluator
+
 
 # 忽略UserWarning
 warnings.simplefilter(action='ignore', category=UserWarning)
@@ -22,20 +21,15 @@ def get_args_parser():
                         help='use checkpoint.checkpoint to save mem')
     parser.add_argument('--num_class', default=1, type=int,
                         help='num of classes in the dataset')
-    parser.add_argument('--random_drop', default=False, action='store_true',
-                        help='random_drop the patch in the image')
-    parser.add_argument('--no_patch_drop', default=False, action='store_true',
-                        help='drop the non ROIpatch in the image')
-    parser.add_argument('--token_reuse', default=True, action='store_true',
-                        help='whether to reuse the token in the image')
     parser.add_argument('--drop_proportion', default=0.0, type=float,
                         help='the proportion of the patch to drop')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
     parser.add_argument('--vals_folder', default='/home/livion/Documents/github/dataset/MOT15_coco/val', type=str,
                         help='the folder of the validation set')
-    parser.add_argument('--vals_json', default='/home/livion/Documents/github/dataset/MOT15_coco/annotations/MOT15_instances_vals.json', type=str,
-                        help='the json file of the validation set')
+    parser.add_argument('--coco_path', type=str)
+    parser.add_argument('--eval_size', default=512, type=int,
+                        help='the size of the validation set')
 
     # * model setting
     parser.add_argument("--det_token_num", default=100, type=int,
@@ -45,7 +39,7 @@ def get_args_parser():
     parser.add_argument('--backbone_name', default='tiny', type=str,
                         help="Name of the deit backbone to use")
     parser.add_argument('--pre_trained', default='',
-                        help="set imagenet pretrained model path if not train yolos from scatch")
+                        help="set imagenet pretrained model path if not train yolos from scratch")
 
     # dataset parameters
     parser.add_argument('--output_dir', default='results',
@@ -62,90 +56,76 @@ def val_dataset_preporcess(args):
     image_paths = []
     reuse_image_paths = []
     files = sorted(os.listdir(args.vals_folder))
-    for file in files:
+    cnt = 0
+    for index,file in enumerate(files):
         file_part = file.split('-')
         file_id = file_part[-1][0:-4]
-        reuse_frame_id = int(file_id) - args.max_reuse_frame
-        reuse_file_name = file[:-7] + str(reuse_frame_id) + '.jpg'
-        if os.path.exists(os.path.join(args.vals_folder, reuse_file_name)):
-            image_paths.append(os.path.join(args.vals_folder, file))
-            reuse_image_paths.append(os.path.join(args.vals_folder, reuse_file_name))
+        reuse_frame_id = int(file_id) - cnt
+        if reuse_frame_id >= 1000:
+            reuse_file_name = file[:-8] + str(reuse_frame_id) + '.jpg'
         else:
-            continue
-
+            reuse_file_name = file[:-7] + str(reuse_frame_id) + '.jpg'
+        reuse_frame_path = os.path.join(args.vals_folder,reuse_file_name)
+        image_paths.append(os.path.join(args.vals_folder,file))
+        if os.path.exists(reuse_frame_path):
+            reuse_image_paths.append(reuse_frame_path)
+            cnt += 1
+            if cnt == args.max_reuse_frame:
+                cnt = 0
+        else:
+            reuse_image_paths.append(os.path.join(args.vals_folder,file))
+            cnt = 0
     return image_paths, reuse_image_paths
 
-def token_reuse_inference(model, image_path : str, reuse_image_path : str, args):
-    img = Image.open(image_path)
-    TRANSFORM = TRANSFORM_tiny if args.backbone_name == 'tiny' else TRANSFORM_base
-    input_tensor = TRANSFORM(img).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
-    original_img = copy.deepcopy(input_tensor)
-    patch_dim_w, patch_dim_h = input_tensor.shape[3] // 16, input_tensor.shape[2] // 16
+def token_reuse_inference(model,image_tensor,target,\
+                          reuse_image_tensor,target_reuse,args):
+    image_tensor = image_tensor.unsqueeze(0)
+    reuse_image_tensor = reuse_image_tensor.unsqueeze(0)
+    original_img = copy.deepcopy(image_tensor)
+
+    patch_dim_w, patch_dim_h = image_tensor.shape[3] // 16, image_tensor.shape[2] // 16
     patch_num = patch_dim_h * patch_dim_w
-
-    image_name = image_path.split('/')[-1]
-    bboxes,image_id = extract_bboxes_from_coco(args.vals_json, image_name)   
+    bboxes = target['boxes']
+    bboxes = box_cxcywh_to_xyxy(bboxes)
+    ground_truth_bboxes = rescale_bboxes(torch.tensor(bboxes), [image_tensor.shape[-1],image_tensor.shape[-2]]).tolist()
     all_indices = set(range(patch_num))
-    for bbox in bboxes:
-        x1, y1, x2, y2 = bbox
-        original_width, original_height = img.size
-        new_width, new_height = input_tensor.shape[3], input_tensor.shape[2]
-        x1 = x1 * (new_width / original_width)
-        y1 = y1 * (new_height / original_height)
-        x2 = x2 * (new_width / original_width)
-        y2 = y2 * (new_height / original_height)
-        # 计算与bounding box相关的patch的开始和结束索引
-        start_row_idx = y1 // 16
-        start_col_idx = x1 // 16
-        end_row_idx = y2 // 16
-        end_col_idx = x2 // 16
-        
-        # 从所有的patch中移除当前bounding box内的patch
-        for i in range(int(start_row_idx), int(end_row_idx)+1):
-            for j in range(int(start_col_idx), int(end_col_idx)+1):
-                patch_idx = i * patch_dim_w + j
-                all_indices.discard(patch_idx)
+    if args.drop_proportion > 0:
+        for bbox in ground_truth_bboxes:
+            x1, y1, x2, y2 = bbox
+            # 计算与bounding box相关的patch的开始和结束索引
+            start_row_idx = y1 // 16
+            start_col_idx = x1 // 16
+            end_row_idx = y2 // 16
+            end_col_idx = x2 // 16
+            # 从所有的patch中移除当前bounding box内的patch
+            for i in range(int(start_row_idx), int(end_row_idx)+1):
+                for j in range(int(start_col_idx), int(end_col_idx)+1):
+                    patch_idx = i * patch_dim_w + j
+                    all_indices.discard(patch_idx)
 
-    drop_num = int(len(all_indices) * args.drop_proportion)
-    # 从除所有bounding boxes外的patches中随机选择要drop的patches
-    row = np.random.choice(list(all_indices), size=drop_num, replace=False)
-    # 假设你有一个ref_tensor与input_tensor尺寸相同
-    reuse_image = Image.open(reuse_image_path)
-    ref_tensor = TRANSFORM(reuse_image).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
-    # 将ref_tensor重新整形为patch形式
-    ref_tensor_patches = rearrange(ref_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
-    # 使用row中的索引从ref_tensor_patches中选取patches
-    replacement_patches = ref_tensor_patches[:, row, :]
-    # 将input_tensor重新整形为patch形式
-    input_tensor_patches = rearrange(input_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
-    # 使用replacement_patches替换input_tensor_patches中的patches
-    input_tensor_patches[:, row, :] = replacement_patches
-    # 将input_tensor_patches重新整形回原始尺寸
-    input_tensor = rearrange(input_tensor_patches, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
+        drop_num = int(len(all_indices) * args.drop_proportion)
+        # 从除所有bounding boxes外的patches中随机选择要drop的patches
+        row = np.random.choice(list(all_indices), size=drop_num, replace=False)
+        # 将ref_tensor重新整形为patch形式
+        ref_tensor_patches = rearrange(reuse_image_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
+        # 使用row中的索引从ref_tensor_patches中选取patches
+        replacement_patches = ref_tensor_patches[:, row, :]
+        # 将input_tensor重新整形为patch形式
+        input_tensor_patches = rearrange(image_tensor, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1=16, p2=16)
+        # 使用replacement_patches替换input_tensor_patches中的patches
+        input_tensor_patches[:, row, :] = replacement_patches
+        # 将input_tensor_patches重新整形回原始尺寸
+        image_tensor = rearrange(input_tensor_patches, 'b (h w) (p1 p2 c) -> b c (h p1) (w p2)', p1=16, p2=16, h=patch_dim_h, w=patch_dim_w)
 
     ###############raw_inference#########
     with torch.no_grad():
         original_img = original_img.to(args.device)
         outputs_raw = model(original_img)
-    probas_raw = outputs_raw['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
-    keep_raw = probas_raw.max(-1).values > 0.9
-    # convert boxes from [0; 1] to image scales
-    bboxes_scaled_raw = rescale_bboxes(outputs_raw['pred_boxes'][0, keep_raw], img.size)
-
     ###############drop_inference#########
     with torch.no_grad():
-        input_tensor = input_tensor.to(args.device)
-        outputs = model(input_tensor)
-    # keep only predictions with 0.7+ confidence
-    probas = outputs['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
-    keep = probas.max(-1).values > 0.9
-    # convert boxes from [0; 1] to image scales
-    bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)
-
-    bboxes_scaled_add_confidence = torch.cat((bboxes_scaled, probas[keep]), dim=1).tolist()
-    bboxes_scale_raw_add_confidence = torch.cat((bboxes_scaled_raw, probas_raw[keep_raw]), dim=1).tolist()
-
-    return bboxes_scale_raw_add_confidence, bboxes_scaled_add_confidence,image_id
+        image_tensor = image_tensor.to(args.device)
+        outputs = model(image_tensor)
+    return outputs,outputs_raw
 
 def main(args):
     # utils.init_distributed_mode(args)
@@ -187,48 +167,33 @@ def main(args):
     model.load_state_dict(checkpoint['model'], strict=False)
     model.eval()
 
+    ######build_dataset########
+    dataset_val = build_dataset(image_set='val', args=args)
+    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    base_ds = get_coco_api_from_dataset(dataset_val)
+    postprocessors = {'bbox': PostProcess()}
+    iou_types = tuple(k for k in ('segm', 'bbox') if k in postprocessors.keys())
+    coco_evaluator = CocoEvaluator(base_ds, iou_types)
+
     image_paths, reuse_image_paths = val_dataset_preporcess(args)
-    raw_prediction = []
-    reuse_prediction = []
-    image_id_pool = []
+
     for image, reuse_image in tzip(image_paths,reuse_image_paths):
-        start_time = time()
-        raw_bbox_c, reuse_bbox_c, image_id = token_reuse_inference(model,image,reuse_image,args)
-        end_time = time()
-        raw_prediction.append(raw_bbox_c)
-        reuse_prediction.append(reuse_bbox_c)
-        image_id_pool.append(image_id)
-        print('image_id: ', image_id,'inference time: ', end_time - start_time, 's')
+        files = sorted(os.listdir(args.vals_folder))
+        index = files.index(image.split('/')[-1])
+        image_tensor, target = dataset_val[index]
+        reuse_index = files.index(reuse_image.split('/')[-1])
+        reuse_image_tensor, target_reuse = dataset_val[reuse_index]
+        outputs,outputs_raw = token_reuse_inference(model,image_tensor,target,\
+                                                    reuse_image_tensor,target_reuse,args)
+        orig_target_sizes = torch.stack([target["orig_size"]], dim=0).to(args.device)
+        results = postprocessors['bbox'](outputs, orig_target_sizes)
+        res = {target['image_id'].item(): results[0]}
+        coco_evaluator.update(res)
 
-    raw_result = detections_to_coco_format(raw_prediction, image_id_pool)
-    reuse_result = detections_to_coco_format(reuse_prediction, image_id_pool)
 
-     # 加载Ground Truth数据
-    raw_coco_gt = COCO(args.vals_json)  # 替换为你的ground truth的COCO格式json文件的路径
-    reuse_coco_gt = COCO(args.vals_json)  # 替换为你的ground truth的COCO格式json文件的路径
-
-    # 使用检测结果来加载COCO detections
-    raw_coco_dt = raw_coco_gt.loadRes(raw_result['annotations'])
-    reuse_coco_dt = reuse_coco_gt.loadRes(reuse_result['annotations'])
-
-    detected_image_ids = set([detection["image_id"] for detection in raw_result['annotations']])
-
-    # 执行评估
-    print("##########raw_inference_evaluation#########")
-    raw_coco_eval = COCOeval(raw_coco_gt, raw_coco_dt, 'bbox')
-    raw_coco_eval.params.imgIds = list(detected_image_ids)  # 仅评估实际进行了预测的图像
-    raw_coco_eval.evaluate()
-    raw_coco_eval.accumulate()
-    raw_coco_eval.summarize()
-
-    # 执行评估
-    print("##########token_reuse_inference_evaluation#########")
-    reuse_coco_eval = COCOeval(reuse_coco_gt, reuse_coco_dt, 'bbox')
-    reuse_coco_eval.params.imgIds = list(detected_image_ids)  # 仅评估实际进行了预测的图像
-    reuse_coco_eval.evaluate()
-    reuse_coco_eval.accumulate()
-    reuse_coco_eval.summarize()
-
+    coco_evaluator.synchronize_between_processes()
+    coco_evaluator.accumulate()
+    coco_evaluator.summarize()
     return
 
 

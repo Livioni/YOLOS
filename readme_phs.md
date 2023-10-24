@@ -15,18 +15,9 @@
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.467
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.847
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.466
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.241
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.422
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.544
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.088
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.527
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.635
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.496
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.619
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.670
 
 2. 使用 YOLOS_B, reuse_frame = 2, drop_proportion = 1.0\
-        results/MOT15Det_base/checkpoint0199.pth，并且用上一帧检测的反馈
+        results/MOT15Det_base/checkpoint0199.pth，并且用真值反馈
 
 
 
@@ -35,14 +26,15 @@
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.236
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.387
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.516
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.090
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.480
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.612
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.412
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.578
-    Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.677
+
+2. 使用 patch_reuse_evaluate.py, reuse_frame = 2, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
+
+3. 使用 token_reuse_evaluate.py, reuse_frame = 2, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+    
 
     
