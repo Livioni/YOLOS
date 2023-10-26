@@ -19,22 +19,88 @@
 2. 使用 YOLOS_B, reuse_frame = 2, drop_proportion = 1.0\
         results/MOT15Det_base/checkpoint0199.pth，并且用真值反馈
 
-
-
 ### YOLOS Tiny
 1. 使用raw YOLOS_T，results/MOT15Det_tiny/checkpoint0299.pth：
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
 
-2. 使用 patch_reuse_evaluate.py, reuse_frame = 2, drop_proportion = 1.0\
+2. 使用 **patch_reuse_evaluate.py**, reuse_frame = 2, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
 
-3. 使用 token_reuse_evaluate.py, reuse_frame = 2, drop_proportion = 1.0\
+3. 使用 **token_reuse_evaluate.py**, reuse_frame = 2, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
-    
 
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
     
+4. 使用 **patch_reuse_evaluate.py**, reuse_frame = 3, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.432
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
+    
+5. 使用 **token_reuse_evaluate.py**, reuse_frame = 3, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.432
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
+        
+6. 使用 **patch_reuse_evaluate.py**, reuse_frame = 4, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.430
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.802
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.410
+    
+7. 使用 **token_reuse_evaluate.py**, reuse_frame = 4, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.430
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.802
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.410
+
+由此可见他们等价
+
+8. 使用 **token_reuse_evaluate.py**, reuse_frame = 5, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.427
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.801
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.408
+
+9. 使用 **token_reuse_evaluate.py**, reuse_frame = 6, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.427
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.800
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.406
+
+10. 使用 **token_reuse_evaluate.py**, reuse_frame = 7, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
+
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.425
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.798
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.399
+
+
+1. 使用 **token_reuse_evaluate.py**, reuse_frame = 2, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，base frame 检测值反馈
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.430
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.800
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.411
+
+2. 使用 **token_reuse_evaluate.py**, reuse_frame = 3, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，base frame 检测值反馈
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.426
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.796
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.408
+    
+Reuse Proportion:  0.8203114300504226

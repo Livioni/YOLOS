@@ -97,7 +97,7 @@ def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
     ################drop_inference#############
     with torch.no_grad():
         reuse_embedding = saved_embedding
-        reuse_region = ground_truth_bboxes
+        reuse_region = bboxes_feed_back
         input_tensor = image_tensor.to(args.device)
         outputs,_,debug_data = model(input_tensor,reuse_embedding,reuse_region,args.drop_proportion)
 
