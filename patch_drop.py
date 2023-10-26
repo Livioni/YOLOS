@@ -1,23 +1,24 @@
 
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-import argparse,copy
+import argparse,copy,os
 from time import time
 import random
+from tqdm import tqdm
 from pathlib import Path
-from PIL import Image
 import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
 import torchvision.transforms as transforms
 import util.misc as utils
-from models.detector import DropDetector
+from models.detector import DropDetector,PostProcess
+from torch.utils.data import DataLoader
 from einops import rearrange
 from util.video_preprocess import file_type
 import warnings
 import json
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
+from datasets import build_dataset, get_coco_api_from_dataset
+from datasets.coco_eval import CocoEvaluator
 
 # 忽略UserWarning
 warnings.simplefilter(action='ignore', category=UserWarning)
@@ -71,7 +72,11 @@ def get_args_parser():
                         help='the proportion of the patch to mask')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
-
+    parser.add_argument('--vals_folder', default='/home/livion/Documents/github/dataset/MOT15_coco/val', type=str,
+                        help='the folder of the validation set')
+    parser.add_argument('--coco_path', type=str,default='/home/livion/Documents/github/dataset/MOT15_coco/')
+    parser.add_argument('--eval_size', default=512, type=int,
+                        help='the size of the validation set')
 
     # * model setting
     parser.add_argument("--det_token_num", default=100, type=int,
@@ -80,7 +85,8 @@ def get_args_parser():
                         help="Name of the deit backbone to use")
     parser.add_argument('--pre_trained', default='',
                         help="set imagenet pretrained model path if not train yolos from scratch")
-
+    parser.add_argument("--max_reuse_frame", default=5, type=int,
+                        help="reuse frame interval")
     # dataset parameters
     parser.add_argument('--output_dir', default='results',
                         help='path where to save, empty for no saving')
@@ -200,6 +206,31 @@ def plot_results(image,prob,bboxes,row):
     plt.tight_layout()
     plt.savefig('results/'+'result.png')
 
+def val_dataset_preporcess(args):
+    image_paths = []
+    reuse_image_paths = []
+    files = sorted(os.listdir(args.vals_folder))
+    cnt = 0
+    for index,file in enumerate(files):
+        file_part = file.split('-')
+        file_id = file_part[-1][0:-4]
+        reuse_frame_id = int(file_id) - cnt
+        if reuse_frame_id >= 1000:
+            reuse_file_name = file[:-8] + str(reuse_frame_id) + '.jpg'
+        else:
+            reuse_file_name = file[:-7] + str(reuse_frame_id) + '.jpg'
+        reuse_frame_path = os.path.join(args.vals_folder,reuse_file_name)
+        image_paths.append(os.path.join(args.vals_folder,file))
+        if os.path.exists(reuse_frame_path):
+            reuse_image_paths.append(reuse_frame_path)
+            cnt += 1
+            if cnt == args.max_reuse_frame:
+                cnt = 0
+        else:
+            reuse_image_paths.append(os.path.join(args.vals_folder,file))
+            cnt = 0
+    return image_paths, reuse_image_paths
+
 def main(args, init_pe_size, mid_pe_size, resume):
     # utils.init_distributed_mode(args)
     # print("git:\n  {}\n".format(utils.get_sha()))
@@ -223,29 +254,35 @@ def main(args, init_pe_size, mid_pe_size, resume):
     )
     model.to(device)
     checkpoint = torch.load(resume, map_location=args.device)
-    model.load_state_dict(checkpoint['model'], strict=False)
+    model.load_state_dict(checkpoint['model'])
+    model.eval()
 
-    if file_type(args.input) == 'image':
-        img = Image.open(args.input)
-        TRANSFORM = TRANSFORM_tiny if args.backbone_name == 'tiny' else TRANSFORM_base
-        input_tensor = TRANSFORM(img).unsqueeze(0)  # tensor数据格式是torch(C,H,W)
-        original_img = copy.deepcopy(input_tensor)
-        patch_dim_w, patch_dim_h = input_tensor.shape[3] // 16, input_tensor.shape[2] // 16
+    ######build_dataset########
+    dataset_val = build_dataset(image_set='val', args=args)
+    sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+    data_loader_val = DataLoader(dataset_val, batch_size=1, sampler=sampler_val,
+                                drop_last=False, collate_fn=utils.collate_fn, num_workers=2)
+    
+    base_ds = get_coco_api_from_dataset(dataset_val)
+    postprocessors = {'bbox': PostProcess()}
+    iou_types = tuple(k for k in ('segm', 'bbox') if k in postprocessors.keys())
+    coco_evaluator = CocoEvaluator(base_ds, iou_types)
+
+    image_paths, reuse_image_paths= val_dataset_preporcess(args)
+    for image in tqdm(image_paths):
+        files = sorted(os.listdir(args.vals_folder))
+        index = files.index(image.split('/')[-1])
+        image_tensor, target = dataset_val[index]
+        patch_dim_w, patch_dim_h = image_tensor.shape[2] // 16, image_tensor.shape[1] // 16
         patch_num = patch_dim_h * patch_dim_w
 
-        bboxes = extract_bboxes_from_coco('/home/livion/Documents/github/dataset/MOT15_coco/annotations/MOT15_instances_vals.json', 'ADL-Rundle-8-000498.jpg')   
-            
+        bboxes = target['boxes']
+        bboxes = box_cxcywh_to_xyxy(bboxes)
+        ground_truth_bboxes = rescale_bboxes(torch.tensor(bboxes), [image_tensor.shape[-1],image_tensor.shape[-2]]).tolist()  
+                
         all_indices = set(range(patch_num))
-        reference_bboxes = []
-        for bbox in bboxes:
+        for bbox in ground_truth_bboxes:
             x1, y1, x2, y2 = bbox
-            reference_bboxes.append([x1, y1, x2, y2])
-            original_width, original_height = img.size
-            new_width, new_height = input_tensor.shape[3], input_tensor.shape[2]
-            x1 = x1 * (new_width / original_width)
-            y1 = y1 * (new_height / original_height)
-            x2 = x2 * (new_width / original_width)
-            y2 = y2 * (new_height / original_height)
             # 计算与bounding box相关的patch的开始和结束索引
             start_row_idx = y1 // 16
             start_col_idx = x1 // 16
@@ -263,52 +300,20 @@ def main(args, init_pe_size, mid_pe_size, resume):
             # 从除所有bounding boxes外的patches中随机选择要mask的patches
             row = np.random.choice(list(all_indices), size=mask_num, replace=False)
             
-        start_time = time()
         ###############mask_inference#########
         with torch.no_grad():
-            input_tensor = input_tensor.to(device)
-            outputs = model(input_tensor,row)
-        end_time = time()
-        print(f'Inference Time:{end_time-start_time:.3f}s.')
+            image_tensor = image_tensor.unsqueeze(0)
+            image_tensor = image_tensor.to(device)
+            outputs = model(image_tensor,row)
+        orig_target_sizes = torch.stack([target["orig_size"]], dim=0).to(args.device)
+        results = postprocessors['bbox'](outputs, orig_target_sizes)
+        res = {target['image_id'].item(): results[0]}
+        coco_evaluator.update(res)
 
-        # keep only predictions with 0.7+ confidence
-        probas = outputs['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
-        keep = probas.max(-1).values > 0.9
-        # convert boxes from [0; 1] to image scales
-        bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], img.size)
-
-        if args.output_dir != '':
-            if args.token_drop:
-                plot_results(img, probas[keep], bboxes_scaled, row)
-
-        # 加载Ground Truth数据
-        bboxes_scaled_add_confidence = torch.cat((bboxes_scaled, probas[keep]), dim=1)
-        # 转换检测结果到COCO格式
-        image_id = 139  # 根据你的数据设置
-        coco_detections = [
-            {
-                "image_id": image_id, 
-                "category_id": 0,  
-                "bbox": [x1, y1, x2-x1, y2-y1], 
-                "score": confidence
-            } 
-            for [x1, y1, x2, y2, confidence] in bboxes_scaled_add_confidence
-        ]
-
-        # 加载Ground Truth数据
-        coco_gt = COCO("/home/livion/Documents/github/dataset/MOT15_coco/annotations/MOT15_instances_vals.json")  # 替换为你的ground truth的COCO格式json文件的路径
-
-        # 使用检测结果来加载COCO detections
-        coco_dt = coco_gt.loadRes(coco_detections)
-
-        # 执行评估
-        coco_eval = COCOeval(coco_gt, coco_dt, 'bbox')
-        coco_eval.params.imgIds = [image_id]  # 设定要评估的图片ID
-        coco_eval.evaluate()
-        coco_eval.accumulate()
-        coco_eval.summarize()
-
-        return 
+    coco_evaluator.synchronize_between_processes()
+    coco_evaluator.accumulate()
+    coco_evaluator.summarize()
+    return 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('YOLOS inference script', parents=[get_args_parser()])

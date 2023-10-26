@@ -82,7 +82,6 @@ def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
     image_tensor = image_tensor.unsqueeze(0)
     reuse_image_tensor = reuse_image_tensor.unsqueeze(0)
     bboxes = target['boxes']
-    bboxes = box_cxcywh_to_xyxy(bboxes)
     ground_truth_bboxes = rescale_bboxes(torch.tensor(bboxes), [image_tensor.shape[-1],image_tensor.shape[-2]]).tolist()
     ###############reference_inference#########
     with torch.no_grad():

@@ -86,7 +86,6 @@ def token_reuse_inference(model,image_tensor,target,\
     patch_dim_w, patch_dim_h = image_tensor.shape[3] // 16, image_tensor.shape[2] // 16
     patch_num = patch_dim_h * patch_dim_w
     bboxes = target['boxes']
-    bboxes = box_cxcywh_to_xyxy(bboxes)
     ground_truth_bboxes = rescale_bboxes(torch.tensor(bboxes), [image_tensor.shape[-1],image_tensor.shape[-2]]).tolist()
     all_indices = set(range(patch_num))
     if args.drop_proportion > 0:
