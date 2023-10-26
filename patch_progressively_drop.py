@@ -1,14 +1,14 @@
 
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import argparse,copy,os
-from time import time
 import random
 from tqdm import tqdm
 from pathlib import Path
+
 import numpy as np
 import torch
 import util.misc as utils
-from models.detector import DropDetector,PostProcess
+from models.detector import ProgressivelyDrop,PostProcess
 from torch.utils.data import DataLoader
 import warnings
 import json
@@ -28,7 +28,7 @@ def get_args_parser():
                         help='num of classes in the dataset')
     parser.add_argument('--token_drop', default=True, action='store_true',
                         help='whether to reuse the token in the image')
-    parser.add_argument('--drop_proportion', default=0.0, type=float,
+    parser.add_argument('--drop_proportion', default=0.1, type=float,
                         help='the proportion of the patch to mask')
     parser.add_argument('--dataset_file', default='mot15', type=str,
                         help='the dataset to train on')
@@ -143,7 +143,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
     np.random.seed(seed)
     random.seed(seed)
 
-    model = DropDetector(
+    model = ProgressivelyDrop(
         num_classes=args.num_class, #类别数91
         pre_trained= args.pre_trained, #pre_train模型pth文件
         det_token_num=args.det_token_num, #100个det token
@@ -180,7 +180,6 @@ def main(args, init_pe_size, mid_pe_size, resume):
         ground_truth_bboxes = rescale_bboxes(torch.tensor(bboxes), [image_tensor.shape[-1],image_tensor.shape[-2]]).tolist()  
                 
         all_indices = set(range(patch_num))
-        reuse_proportion = []
         for bbox in ground_truth_bboxes:
             x1, y1, x2, y2 = bbox
             # 计算与bounding box相关的patch的开始和结束索引
@@ -199,7 +198,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
             mask_num = int(len(all_indices) * args.drop_proportion)
             # 从除所有bounding boxes外的patches中随机选择要mask的patches
             row = np.random.choice(list(all_indices), size=mask_num, replace=False)
-            reuse_proportion.append(mask_num / len(all_indices))
+            
         ###############mask_inference#########
         with torch.no_grad():
             image_tensor = image_tensor.unsqueeze(0)
@@ -209,8 +208,7 @@ def main(args, init_pe_size, mid_pe_size, resume):
         results = postprocessors['bbox'](outputs, orig_target_sizes)
         res = {target['image_id'].item(): results[0]}
         coco_evaluator.update(res)
-        
-    print('reuse_proportion:',np.mean(reuse_proportion))
+
     coco_evaluator.synchronize_between_processes()
     coco_evaluator.accumulate()
     coco_evaluator.summarize()

@@ -25,70 +25,51 @@
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
 
-2. 使用 **patch_reuse_evaluate.py**, reuse_frame = 2, drop_proportion = 1.0\
-        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
-
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
-
-3. 使用 **token_reuse_evaluate.py**, reuse_frame = 2, drop_proportion = 1.0\
-        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
-
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
-    
-4. 使用 **patch_reuse_evaluate.py**, reuse_frame = 3, drop_proportion = 1.0\
+2. 使用 **token_reuse_evaluate.py**, reuse_frame = 2, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
 
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.432
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.802
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
-    
-5. 使用 **token_reuse_evaluate.py**, reuse_frame = 3, drop_proportion = 1.0\
-        results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
-
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.432
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
-        
-6. 使用 **patch_reuse_evaluate.py**, reuse_frame = 4, drop_proportion = 1.0\
+     
+3. 使用 **token_reuse_evaluate.py**, reuse_frame = 3, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
 
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.430
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.802
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.410
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.797
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
     
-7. 使用 **token_reuse_evaluate.py**, reuse_frame = 4, drop_proportion = 1.0\
+4. 使用 **token_reuse_evaluate.py**, reuse_frame = 4, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
 
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.430
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.802
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.410
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.425
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.793
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.413
 
+Reuse Proportion:  0.8033412173652144
 由此可见他们等价
 
 8. 使用 **token_reuse_evaluate.py**, reuse_frame = 5, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
 
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.427
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.801
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.408
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.421
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.785
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.403
 
 9. 使用 **token_reuse_evaluate.py**, reuse_frame = 6, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
 
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.427
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.800
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.406
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.415
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.777
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.397
 
 10. 使用 **token_reuse_evaluate.py**, reuse_frame = 7, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
 
-    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.425
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.798
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.399
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.410
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.766
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.391
+
 
 
 1. 使用 **token_reuse_evaluate.py**, reuse_frame = 2, drop_proportion = 1.0\
@@ -103,4 +84,130 @@
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.796
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.408
     
+3. 使用 **token_reuse_evaluate.py**, reuse_frame = 4, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，base frame 检测值反馈
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.419
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.788
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.400
+
+4. 使用 **token_reuse_evaluate.py**, reuse_frame = 5, drop_proportion = 1.0\
+        results/MOT15Det_tiny/checkpoint0299.pth，base frame 检测值反馈
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.415
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.782
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.398
+
 Reuse Proportion:  0.8203114300504226
+
+### Token Drop
+1.  python patch_drop.py --drop_proportion 0.1
+    reuse_proportion: 0.09972677595628415
+
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.427
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.804
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.406
+
+2.  python patch_drop.py --drop_proportion 0.2
+    reuse_proportion: 0.1994535519125683
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.409
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.801
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.371
+
+3. python patch_drop.py --drop_proportion 0.3
+    reuse_proportion: 0.2998633879781421
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.376
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.784
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.316
+
+4. python patch_drop.py --drop_proportion 0.4
+    reuse_proportion: 0.39959016393442626
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.332
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.747
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.239
+
+5. python patch_drop.py --drop_proportion 0.5
+    reuse_proportion: 0.5
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.277
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.699
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.153
+
+6. python patch_drop.py --drop_proportion 0.6
+    reuse_proportion: 0.5997267759562842
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.210
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.605
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.087
+
+7. python patch_drop.py --drop_proportion 0.7
+    reuse_proportion: 0.6994535519125683
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.138
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.465
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.033
+
+8. python patch_drop.py --drop_proportion 0.8
+    reuse_proportion: 0.8
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.074
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.295
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.010
+
+9. python patch_drop.py --drop_proportion 0.9
+    reuse_proportion: 0.8995901639344263
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.033
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.147
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.004
+
+10. python patch_drop.py --drop_proportion 1.0
+    reuse_proportion: 1.0
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.013
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.058
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.002
+
+### Token Progressively Drop
+1.  10%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.432
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.804
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
+
+2. 20%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.429
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.806
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.407
+
+3. 30%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.426
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.809
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.404
+
+4. 40%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.418
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.806
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.391
+
+5. 50%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.409
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.806
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.367
+
+6. 60%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.393
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.797
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.339
+
+7. 70%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.376
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.790
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.309
+
+8. 80%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.351
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.773
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.265
+
+9. 90%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.323
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.757
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.213
+
+10. 100%
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.286
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.723
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.155
+    

@@ -253,6 +253,28 @@ class VisionTransformer(nn.Module):
         # set finetune flag
         self.has_mid_pe = False
 
+    def bboxes_to_row(self, bboxes_mask : list, input_size : tuple, drop_proportion : float = 1.0,):
+        patch_dim_w, patch_dim_h = input_size[0] // self.patch_size, input_size[1] // self.patch_size
+        patch_num = patch_dim_h * patch_dim_w
+        all_indices = set(range(patch_num))
+        for bbox in bboxes_mask:
+            x1, y1, x2, y2 = bbox
+            # 计算与bounding box相关的patch的开始和结束索引
+            start_row_idx = y1 // self.patch_size
+            start_col_idx = x1 // self.patch_size
+            end_row_idx = y2 // self.patch_size
+            end_col_idx = x2 // self.patch_size
+            
+            # 从所有的patch中移除当前bounding box内的patch
+            for i in range(int(start_row_idx), int(end_row_idx)+1):
+                for j in range(int(start_col_idx), int(end_col_idx)+1):
+                    patch_idx = i * patch_dim_w + j
+                    all_indices.discard(patch_idx)
+
+            mask_num = int(len(all_indices) * drop_proportion)
+            # 从除所有bounding boxes外的patches中随机选择要mask的patches
+            row = np.random.choice(list(all_indices), size=mask_num, replace=False)
+            return row
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -637,6 +659,85 @@ class VisionTransformerPatchDrop(VisionTransformer):
             x = self.forward_features(x,row)
             return x
 
+class VisionTransformerPatchDropProgressively(VisionTransformerPatchDrop):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop_rate=0, attn_drop_rate=0, drop_path_rate=0, hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False):
+        super().__init__(img_size, patch_size, in_chans, num_classes, embed_dim, depth, num_heads, mlp_ratio, qkv_bias, qk_scale, drop_rate,            attn_drop_rate, drop_path_rate, hybrid_backbone, norm_layer, is_distill)
+    
+        self.drop_proportion_step = np.linspace(0.0, 1.0, len(self.blocks)) 
+
+    def forward_features(self, x, row):
+        # import pdb;pdb.set_trace()
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+        # if (H,W) != self.img_size:
+        #     self.finetune = True
+        # row = self.bboxes_to_row(bboxes_mask, input_size=(W,H))
+        patch_to_drop = 0 if row is None else len(row)
+        row = [] if row is None else row
+        drop_num = self.drop_proportion_step * patch_to_drop
+        self.drop_num_per_step = []
+        for i in range(len(drop_num)):
+            if i > 0:
+                self.drop_num_per_step.append(int(drop_num[i]-drop_num[i-1]))
+            else:
+                self.drop_num_per_step.append(int(drop_num[i]))
+        self.drop_num_per_step[-1] += patch_to_drop - sum(self.drop_num_per_step) 
+        x = self.patch_embed(x, row=[])
+        # interpolate init pe
+        if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
+            temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, row=[], img_size=(H,W))
+        else:
+            temp_pos_embed = self.pos_embed
+        # interpolate mid pe
+        if self.has_mid_pe:
+            # temp_mid_pos_embed = []
+            if (self.mid_pos_embed.shape[2] - 1 - self.det_token_num) != x.shape[1]:
+                temp_mid_pos_embed = self.InterpolateMidPosEmbed(self.mid_pos_embed, row=[], img_size=(H,W))
+            else:
+                temp_mid_pos_embed = self.mid_pos_embed
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        det_token = self.det_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x, det_token), dim=1)
+        x = x + temp_pos_embed
+        x = self.pos_drop(x)
+        for i in range(len((self.blocks))):
+            if self.use_checkpoint:
+                x = checkpoint.checkpoint(self.blocks[i], x)    # saves mem, takes time
+            else:
+                x, row = self.progressively_drop(x, row, self.drop_num_per_step[i])
+                x = self.blocks[i](x)
+            if self.has_mid_pe:
+                if i < (self.depth - 1):
+                    x = x + temp_mid_pos_embed[i]
+
+        x = self.norm(x)
+
+        return x[:, -self.det_token_num:, :]
+    
+    def progressively_drop(self, x : torch.Tensor, row : list, drop_num_per_step : int): 
+        cls_tokens, patch_token, det_token = x[:, 0:1, :], x[:, 1:-self.det_token_num, :], x[:, -self.det_token_num:, :]
+        all_indexes = set(range(patch_token.size(1)))
+        drop_indexes = set(np.random.choice(row, size=drop_num_per_step, replace=False))
+        keep_indexes = all_indexes - drop_indexes
+        patch_token = patch_token[:, list(keep_indexes), :]
+        row = self.__update_row(row, drop_indexes)
+        x = torch.cat((cls_tokens, patch_token, det_token), dim=1)
+        return x, row
+
+    def __update_row(self, row : list, drop_indexes : set):
+        if len(drop_indexes) == 0:
+            return row
+        row = sorted(row)
+        cnt = 0
+        for i in (range(len(row))):
+            if row[i] in drop_indexes:
+                row[i] = -1
+                cnt += 1
+            else:
+                row[i] -= cnt
+        row = [x for x in row if x != -1]
+        return row
+
 def _conv_filter(state_dict, patch_size=16):
     """ convert patch embedding weight from manual patchify + linear proj to conv"""
     out_dict = {}
@@ -662,6 +763,20 @@ def reuse_tiny(pretrained=None, **kwargs):
 
 def droptiny(pretrained=None, **kwargs):
     model = VisionTransformerPatchDrop(
+                patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6))
+    if pretrained: 
+        # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_tiny_patch16_224-a1311bcf.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 192
+
+def progressively_drop_tiny(pretrained=None, **kwargs):
+    model = VisionTransformerPatchDropProgressively(
                 patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
                 norm_layer=partial(nn.LayerNorm, eps=1e-6))
     if pretrained: 
@@ -746,6 +861,20 @@ def dropbase(pretrained=None, **kwargs):
 
 def reuse_base(pretrained=None, **kwargs):
     model = VisionTransformerTokenReuse(
+        img_size=384, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
+        norm_layer=partial(nn.LayerNorm, eps=1e-6),is_distill=True, **kwargs)
+    if pretrained:
+        # checkpoint = torch.load('deit_base_distilled_patch16_384-d0272ac0.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_base_distilled_patch16_384-d0272ac0.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 768
+
+def progressively_drop_drop_base(pretrained=None, **kwargs):
+    model = VisionTransformerPatchDropProgressively(
         img_size=384, patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),is_distill=True, **kwargs)
     if pretrained:

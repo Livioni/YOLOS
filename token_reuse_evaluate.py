@@ -27,7 +27,7 @@ def get_args_parser():
                         help='the dataset to train on')
     parser.add_argument('--vals_folder', default='/home/livion/Documents/github/dataset/MOT15_coco/val', type=str,
                         help='the folder of the validation set')
-    parser.add_argument('--coco_path', type=str)
+    parser.add_argument('--coco_path', default='/home/livion/Documents/github/dataset/MOT15_coco', type=str)
     parser.add_argument('--eval_size', default=512, type=int,
                         help='the size of the validation set')
 
@@ -47,7 +47,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='results/MOT15Det_tiny/checkpoint0299.pth', help='resume from checkpoint')
 
 
     return parser

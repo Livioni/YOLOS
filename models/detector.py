@@ -141,6 +141,22 @@ class ReuseDetector(nn.Module):
         attention = self.backbone(samples.tensors,reuse_embedding=None, reuse_region=None, drop_proportion=None, return_attention=True)
         return attention
 
+class ProgressivelyDrop(DropDetector):
+    def __init__(self, num_classes, pre_trained=None, det_token_num=100, backbone_name='tiny', init_pe_size=[800, 1344], mid_pe_size=None, use_checkpoint=False):
+        super().__init__(num_classes, pre_trained, det_token_num, backbone_name, init_pe_size, mid_pe_size, use_checkpoint)
+        
+        if backbone_name == 'tiny':
+            self.backbone, hidden_dim = progressively_drop_tiny(pretrained=pre_trained)
+        elif backbone_name == 'small':
+            self.backbone, hidden_dim = small(pretrained=pre_trained)
+        elif backbone_name == 'base':
+            self.backbone, hidden_dim = progressively_drop_drop_base(pretrained=pre_trained)
+        elif backbone_name == 'small_dWr':
+            self.backbone, hidden_dim = small_dWr(pretrained=pre_trained)
+        else:
+            raise ValueError(f'backbone {backbone_name} not supported')
+        
+        self.backbone.finetune_det(det_token_num=det_token_num, img_size=init_pe_size, mid_pe_size=mid_pe_size, use_checkpoint=use_checkpoint)
 
 class SetCriterion(nn.Module):
     """ This class computes the loss for DETR.
