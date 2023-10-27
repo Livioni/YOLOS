@@ -7,8 +7,8 @@
 - **tools/det_token_attention_bbox.py**: 使用YOLOS文章中的技巧，可视化置信度大于阈值的det_tokens的self-attention热力图。
 - **tools/detr_attenton_visualizer.py**: 使用detr文章的技巧，可视化encoder中最后一层的self-attention，并以bboxes框中心作为索引值（reference point）可视化当前的热力图。
 - **patch_drop.py**: 直接丢弃（不是mask）一定比例的非ROI区域的patch，ROI由真值提供。
-
-
+- **token_merge.py**: TOKEN Merging : Your ViT But Faster
+  
 ## Result 
 ### YOLOS Base
 1. 使用raw YOLOS_B，results/MOT15Det_base/checkpoint0199.pth：
@@ -210,4 +210,13 @@ Reuse Proportion:  0.8203114300504226
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.286
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.723
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.155
+    
+### Token Merging
+
+1. 10% 分12次Merging 10%的所有token
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.422
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.799
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.392
+
+2. 100% 分12次Merging 100%的所有token
     

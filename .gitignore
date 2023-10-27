@@ -18,3 +18,4 @@ output/
 inputs/
 visualization/exp
 results/*/
+raw_weights/

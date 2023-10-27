@@ -21,7 +21,7 @@ plt.figure(figsize=(12, 8))
 
 # Loop through each method to plot its data
 for method in df_transposed.columns:
-    plt.plot(df_transposed.index, df_transposed[method], marker='o', label=method, markersize=12)
+    plt.plot(df_transposed.index, df_transposed[method], marker='o', label=method, markersize=8, linewidth=3)
     # Annotate each data point
     for x, y in zip(df_transposed.index, df_transposed[method]):
         plt.annotate(f"{y:.3f}", (x, y), textcoords="offset points", xytext=(0,10), ha='center', fontsize=14)

@@ -5,6 +5,7 @@ from functools import partial
 from einops import rearrange
 from .layers import DropPath, to_2tuple, trunc_normal_
 import torch.utils.checkpoint as checkpoint 
+from models.tome_merge import bipartite_soft_matching, merge_source, merge_wavg
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -79,6 +80,39 @@ class Block(nn.Module):
             x = x + self.drop_path(self.mlp(self.norm2(x)))
             return x
 
+class MergeBlock(Block):
+    def __init__(self, dim, num_heads, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop=0, attn_drop=0, drop_path=0, act_layer=nn.GELU, norm_layer=nn.LayerNorm, det_token_num=100):
+        super().__init__(dim, num_heads, mlp_ratio, qkv_bias, qk_scale, drop, attn_drop, drop_path, act_layer, norm_layer)
+        self.det_token_num = det_token_num    
+        self.tome_size = None
+
+    def forward(self, x, merging_proportion = 0.9/12, return_attention=False):
+        if return_attention:
+            y, attn = self.attn(self.norm1(x), return_attention=return_attention)
+            x = x + self.drop_path(y)
+            x = x + self.drop_path(self.mlp(self.norm2(x)))
+            return x, attn
+        else:
+
+            y = self.attn(self.norm1(x), return_attention=return_attention)
+            x = x + self.drop_path(y)
+            #extract patch tokens
+            cls_tokens, patch_token, det_token = x[:, 0:1, :], x[:, 1:-self.det_token_num, :], x[:, -self.det_token_num:, :]
+            #calculate the number of patch tokens to be merged
+            r = int(merging_proportion * 1590)
+            #init the merge function
+            merge, _ = bipartite_soft_matching(
+                patch_token,
+                r,
+                False,
+                False,
+            )
+            #merge the patch tokens
+            patch_token, self.tome_size = merge_wavg(merge, patch_token, None)
+            #concat the cls tokens, patch tokens and det tokens
+            x = torch.cat((cls_tokens, patch_token, det_token), dim=1)
+            x = x + self.drop_path(self.mlp(self.norm2(x)))
+            return x
 
 class PatchEmbed(nn.Module):
     """ Image to Patch Embedding
@@ -194,7 +228,6 @@ class HybridEmbed(nn.Module):
         x = x.flatten(2).transpose(1, 2)
         x = self.proj(x)
         return x
-
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer with support for patch or hybrid CNN input stage
@@ -465,7 +498,18 @@ class VisionTransformer(nn.Module):
         else:
             x = self.forward_features(x)
             return x
+
+class VisionTransformerTokenMerging(VisionTransformer):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop_rate=0, attn_drop_rate=0, drop_path_rate=0, hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False, det_token_num=100):
+        super().__init__(img_size, patch_size, in_chans, num_classes, embed_dim, depth, num_heads, mlp_ratio, qkv_bias, qk_scale, drop_rate, attn_drop_rate, drop_path_rate, hybrid_backbone, norm_layer, is_distill)
         
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        self.blocks = nn.ModuleList([
+        MergeBlock(
+            dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+            drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, det_token_num=det_token_num)
+        for i in range(depth)])
+
 class VisionTransformerTokenReuse(VisionTransformer):
     """ Vision Transformer with support for patch or hybrid CNN input stage
     """
@@ -568,7 +612,6 @@ class VisionTransformerTokenReuse(VisionTransformer):
         else:
             x,saved_embedding,debug_data = self.forward_features(x, reuse_embedding, reuse_region, drop_proportion)
             return x, saved_embedding, debug_data
-
 
 class VisionTransformerPatchDrop(VisionTransformer):
     """ Vision Transformer with support for patch or hybrid CNN input stage
@@ -789,6 +832,20 @@ def progressively_drop_tiny(pretrained=None, **kwargs):
         model.load_state_dict(checkpoint["model"], strict=False)
     return model, 192
 
+def token_merging_tiny(pretrained=None, **kwargs):
+    model = VisionTransformerTokenMerging(
+                patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6), det_token_num=100)
+    if pretrained: 
+        # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_tiny_patch16_224-a1311bcf.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 192
+
 def tiny(pretrained=None, **kwargs):
     model = VisionTransformer(
                 patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
@@ -803,7 +860,6 @@ def tiny(pretrained=None, **kwargs):
         model.load_state_dict(checkpoint["model"], strict=False)
     return model, 192
 
-    
 def small(pretrained=None, **kwargs):
     model = VisionTransformerTokenReuse(
         patch_size=16, embed_dim=384, depth=12, num_heads=6, mlp_ratio=4, qkv_bias=True,
@@ -818,7 +874,6 @@ def small(pretrained=None, **kwargs):
         model.load_state_dict(checkpoint["model"], strict=False)
     return model, 384
 
-
 def small_dWr(pretrained=None, **kwargs):
     model = VisionTransformer(
         img_size=240, 
@@ -829,7 +884,6 @@ def small_dWr(pretrained=None, **kwargs):
         checkpoint = torch.load(pretrained, map_location="cpu")
         model.load_state_dict(checkpoint["model"], strict=False)
     return model, 330
-
 
 def base(pretrained=None, **kwargs):
     model = VisionTransformer(
