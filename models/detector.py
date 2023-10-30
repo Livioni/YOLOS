@@ -173,6 +173,35 @@ class TokenMerging(Detector):
         
         self.backbone.finetune_det(det_token_num=det_token_num, img_size=init_pe_size, mid_pe_size=mid_pe_size, use_checkpoint=use_checkpoint)
 
+class TokenReorganizations(Detector):
+    def __init__(self, num_classes, pre_trained=None, det_token_num=100, backbone_name='tiny', init_pe_size=[800, 1344], mid_pe_size=None, use_checkpoint=False,\
+                 keep_rate=1.0):
+        super().__init__(num_classes, pre_trained, det_token_num, backbone_name, init_pe_size, mid_pe_size, use_checkpoint)
+        if backbone_name == 'tiny':
+            self.backbone, hidden_dim = token_reorganizations_tiny(pretrained=pre_trained,keep_rate=keep_rate)
+        elif backbone_name == 'small':
+            self.backbone, hidden_dim = small(pretrained=pre_trained)
+        elif backbone_name == 'base':
+            self.backbone, hidden_dim = base(pretrained=pre_trained)
+        elif backbone_name == 'small_dWr':
+            self.backbone, hidden_dim = small_dWr(pretrained=pre_trained)
+        else:
+            raise ValueError(f'backbone {backbone_name} not supported')
+        
+        self.keep_rate = keep_rate
+        self.backbone.finetune_det(det_token_num=det_token_num, img_size=init_pe_size, mid_pe_size=mid_pe_size, use_checkpoint=use_checkpoint)
+
+    def forward(self, samples: NestedTensor):
+        # import pdb;pdb.set_trace()
+        if isinstance(samples, (list, torch.Tensor)):
+            samples = nested_tensor_from_tensor_list(samples)
+        x = self.backbone(samples.tensors)
+        # x = x[:, 1:,:]
+        outputs_class = self.class_embed(x)
+        outputs_coord = self.bbox_embed(x).sigmoid()
+        out = {'pred_logits': outputs_class, 'pred_boxes': outputs_coord}
+        return out
+    
 class SetCriterion(nn.Module):
     """ This class computes the loss for DETR.
     The process happens in two steps:
@@ -405,7 +434,7 @@ def build(args):
     device = torch.device(args.device)
 
     # import pdb;pdb.set_trace()
-    model = TokenMerging(
+    model = Detector(
         num_classes=num_classes, #类别数91
         pre_trained=args.pre_trained, #pre_train模型pth文件
         det_token_num=args.det_token_num, #100个det token

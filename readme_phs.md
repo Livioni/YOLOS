@@ -8,6 +8,7 @@
 - **tools/detr_attenton_visualizer.py**: 使用detr文章的技巧，可视化encoder中最后一层的self-attention，并以bboxes框中心作为索引值（reference point）可视化当前的热力图。
 - **patch_drop.py**: 直接丢弃（不是mask）一定比例的非ROI区域的patch，ROI由真值提供。
 - **token_merge.py**: TOKEN Merging : Your ViT But Faster
+- **token_reorganizations** : token_reorganizations ICLR'22
   
 ## Result 
 ### YOLOS Base
@@ -20,10 +21,10 @@
         results/MOT15Det_base/checkpoint0199.pth，并且用真值反馈
 
 ### YOLOS Tiny
-1. 使用raw YOLOS_T，results/MOT15Det_tiny/checkpoint0299.pth：
+1. 使用raw YOLOS_T，results/MOT15Det_tiny/checkpoint0299.pth： [848 x 480]
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
-    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.803
-    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.804
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.416
 
 2. 使用 **token_reuse_evaluate.py**, reuse_frame = 2, drop_proportion = 1.0\
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
@@ -219,4 +220,15 @@ Reuse Proportion:  0.8203114300504226
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.392
 
 2. 100% 分12次Merging 100%的所有token
-    
+
+
+### Evit
+1. keep_rate = 1.0： [848 x 480]
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.433
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.804
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.416
+
+2. keep_rate = 0.9:
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.421
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.800
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.401

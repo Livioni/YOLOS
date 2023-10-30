@@ -1,4 +1,4 @@
-import torch
+import torch,math
 import numpy as np
 import torch.nn as nn
 from functools import partial
@@ -6,6 +6,29 @@ from einops import rearrange
 from .layers import DropPath, to_2tuple, trunc_normal_
 import torch.utils.checkpoint as checkpoint 
 from models.tome_merge import bipartite_soft_matching, merge_source, merge_wavg
+
+def complement_idx(idx, dim):
+    """
+    Compute the complement: set(range(dim)) - set(idx).
+    idx is a multi-dimensional tensor, find the complement for its trailing dimension,
+    all other dimension is considered batched.
+    Args:
+        idx: input index, shape: [N, *, K]
+        dim: the max index for complement
+    """
+    a = torch.arange(dim, device=idx.device)
+    ndim = idx.ndim
+    dims = idx.shape
+    n_idx = dims[-1]
+    dims = dims[:-1] + (-1, )
+    for i in range(1, ndim):
+        a = a.unsqueeze(0)
+    a = a.expand(*dims)
+    masked = torch.scatter(a, -1, idx, 0)
+    compl, _ = torch.sort(masked, dim=-1, descending=False)
+    compl = compl.permute(-1, *tuple(range(ndim - 1)))
+    compl = compl[n_idx:].permute(*(tuple(range(1, ndim)) + (0,)))
+    return compl
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -54,7 +77,7 @@ class Attention(nn.Module):
             return x, attn
         else:
             return x
-
+        
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
@@ -77,6 +100,50 @@ class Block(nn.Module):
             return x, attn
         else:
             x = x + self.drop_path(self.attn(self.norm1(x)))
+            x = x + self.drop_path(self.mlp(self.norm2(x)))
+            return x
+        
+class AttentivenessBlock(Block):
+    def __init__(self, dim, num_heads, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop=0, attn_drop=0, drop_path=0, act_layer=nn.GELU, norm_layer=nn.LayerNorm,\
+                 fuse_token=False, det_token_num=100, keep_rate=0.9):
+        super().__init__(dim, num_heads, mlp_ratio, qkv_bias, qk_scale, drop, attn_drop, drop_path, act_layer, norm_layer)
+        self.fuse_token = fuse_token
+        self.det_token_num = det_token_num
+        self.keep_rate = keep_rate
+        
+    def forward(self, x, return_attention=False):
+        B, N, C = x.shape        
+        y, attn = self.attn(self.norm1(x),return_attention=True)
+        if self.keep_rate < 1:
+            left_tokens = math.ceil(self.keep_rate * (N - 101))
+            det_attn = attn[:, :, -self.det_token_num:, 1:-self.det_token_num,]  # [B, H, N-1]
+            det_attn = torch.mean(det_attn, dim=1)  # [B, N-1]
+            attention_value = torch.mean(det_attn, dim=1)
+
+            _, idx = torch.topk(attention_value, left_tokens, dim=1, largest=True, sorted=True)  # [B, left_tokens]
+
+            index = idx.unsqueeze(-1).expand(-1, -1, C)  # [B, left_tokens, C]
+            x = x + self.drop_path(y)
+            if index is not None:
+                # B, N, C = x.shape
+                non_cls = x[:, 1:-self.det_token_num, :]  # [B, N-1, C]
+                # x_others = torch.gather(non_cls, dim=1, index=index)  # [B, left_tokens, C]
+                idx = torch.sort(idx, dim=1)[0][0]
+                x_others = non_cls[:, idx, :]
+
+                if self.fuse_token:
+                    compl = complement_idx(idx, N - 101)  # [B, N-1-left_tokens]
+                    # non_topk = torch.gather(non_cls, dim=1, index=compl.unsqueeze(-1).expand(-1, -1, C))  # [B, N-1-left_tokens, C]
+                    non_topk = non_cls[:, compl, :]                    
+                    non_topk_attn = torch.gather(attention_value, dim=1, index=compl.unsqueeze(0))  # [B, N-1-left_tokens]
+                    extra_token = torch.sum(non_topk * non_topk_attn.unsqueeze(-1), dim=1, keepdim=True)  # [B, 1, C]
+                    x = torch.cat([x[:, 0:1], x_others, extra_token], dim=1)
+                else:
+                    x = torch.cat([x[:, 0:1], x_others, x[:,-self.det_token_num:]], dim=1)
+            x = x + self.drop_path(self.mlp(self.norm2(x)))
+            return x
+        else:
+            x = x + self.drop_path(y)
             x = x + self.drop_path(self.mlp(self.norm2(x)))
             return x
 
@@ -308,6 +375,7 @@ class VisionTransformer(nn.Module):
             # 从除所有bounding boxes外的patches中随机选择要mask的patches
             row = np.random.choice(list(all_indices), size=mask_num, replace=False)
             return row
+        
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -781,6 +849,21 @@ class VisionTransformerPatchDropProgressively(VisionTransformerPatchDrop):
         row = [x for x in row if x != -1]
         return row
 
+class VisionTransformerTokenReorganizations(VisionTransformer):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop_rate=0, attn_drop_rate=0, drop_path_rate=0, hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False,\
+                 keep_rate=1.0):
+        super().__init__(img_size, patch_size, in_chans, num_classes, embed_dim, depth, num_heads, mlp_ratio, qkv_bias, qk_scale, drop_rate, attn_drop_rate, drop_path_rate, hybrid_backbone, norm_layer, is_distill)
+        
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        keep_rates = [1.0,1.0,1.0,keep_rate,1.0,1.0,keep_rate,1.0,1.0,keep_rate,1.0,1.0]
+        # whether_fuse = [False,False,False,True,False,False,True,False,False,True,False,False]
+
+        self.blocks = nn.ModuleList([
+            AttentivenessBlock(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, keep_rate=keep_rates[i],fuse_token = False)    
+            for i in range(depth)])
+    
 def _conv_filter(state_dict, patch_size=16):
     """ convert patch embedding weight from manual patchify + linear proj to conv"""
     out_dict = {}
@@ -836,6 +919,20 @@ def token_merging_tiny(pretrained=None, **kwargs):
     model = VisionTransformerTokenMerging(
                 patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
                 norm_layer=partial(nn.LayerNorm, eps=1e-6), det_token_num=100)
+    if pretrained: 
+        # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_tiny_patch16_224-a1311bcf.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 192
+
+def token_reorganizations_tiny(pretrained=None, keep_rate = 1.0, **kwargs):
+    model = VisionTransformerTokenReorganizations(
+                patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6),keep_rate=keep_rate)
     if pretrained: 
         # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
         # checkpoint = torch.hub.load_state_dict_from_url(
