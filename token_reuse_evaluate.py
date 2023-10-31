@@ -9,6 +9,9 @@ import util.misc as utils
 from models.detector import ReuseDetector,PostProcess
 from datasets import build_dataset, get_coco_api_from_dataset
 from datasets.coco_eval import CocoEvaluator
+import matplotlib.pyplot as plt
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 
 
 # 忽略UserWarning
@@ -87,20 +90,35 @@ def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
     with torch.no_grad():
         reuse_embedding = None
         reuse_region = None
+        det_token_index = None
         reference_tensor = reuse_image_tensor.to(args.device)
-        outputs_reference,saved_embedding,_ = model(reference_tensor,reuse_embedding,reuse_region,args.drop_proportion)
+        additional_data = {'reuse_embedding':reuse_embedding,\
+                           'reuse_region':reuse_region,\
+                           'drop_proportion':args.drop_proportion,\
+                           'det_token_index':det_token_index}
+        outputs_reference,saved_embedding,intermedia_data = model(reference_tensor,additional_data)
     
+    # visualize_attention(intermedia_data['block_attn'],save_path = 'attention_weights_raw.png')
     probas_reference = outputs_reference['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
     keep_reference = probas_reference.max(-1).values > 0.9
+    # print(np.where(keep_reference==True))
     bboxes_feed_back = rescale_bboxes(outputs_reference['pred_boxes'][0, keep_reference], [image_tensor.shape[-1],image_tensor.shape[-2]])
     ################drop_inference#############
+    det_token_mask = keep_reference.squeeze(0)
+    det_token_index = torch.nonzero(det_token_mask).tolist()
+    det_token_index = [item for sublist in det_token_index for item in sublist]
     with torch.no_grad():
         reuse_embedding = saved_embedding
         reuse_region = bboxes_feed_back
         input_tensor = image_tensor.to(args.device)
-        outputs,_,debug_data = model(input_tensor,reuse_embedding,reuse_region,args.drop_proportion)
+        additional_data = {'reuse_embedding':reuse_embedding,\
+                           'reuse_region':reuse_region,\
+                            'drop_proportion':args.drop_proportion,\
+                            'det_token_index':None}
+        outputs,_,_ = model(input_tensor,additional_data)
 
-    return outputs,debug_data
+    # visualize_attention(intermedia_data['block_attn'],save_path = 'attention_weights_2.png')
+    return outputs,intermedia_data
 
 
 def main(args):
@@ -153,8 +171,8 @@ def main(args):
     coco_evaluator = CocoEvaluator(base_ds, iou_types)
 
     image_paths, reuse_image_paths= val_dataset_preporcess(args)
-    reuse_propotion = []
-
+    reuse_proportion = []
+    
     for image, reuse_image in tzip(image_paths,reuse_image_paths):
         files = sorted(os.listdir(args.vals_folder))
         index = files.index(image.split('/')[-1])
@@ -167,13 +185,14 @@ def main(args):
         results = postprocessors['bbox'](outputs, orig_target_sizes)
         res = {target['image_id'].item(): results[0]}
         coco_evaluator.update(res)
-        reuse_propotion.append(debug_data['reuse_proportion'])
+        reuse_proportion.append(debug_data['reuse_proportion'])
+
 
     coco_evaluator.synchronize_between_processes()
     coco_evaluator.accumulate()
     coco_evaluator.summarize()
 
-    print('Reuse Proportion: ', np.mean(reuse_propotion))
+    print('Reuse Proportion: ', np.mean(reuse_proportion))
     return
 
 

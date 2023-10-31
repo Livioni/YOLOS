@@ -123,21 +123,21 @@ class ReuseDetector(nn.Module):
         self.class_embed = MLP(hidden_dim, hidden_dim, num_classes + 1, 3) #输出为91维向量
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3) #输出为4维向量
     
-    def forward(self, samples: NestedTensor, reuse_embedding: torch.Tensor, reuse_region : list, drop_proportion: int):
+    def forward(self, samples: NestedTensor, additional_data: dict):
         # import pdb;pdb.set_trace()
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
-        x,saved_embedding,debug_data = self.backbone(samples.tensors, reuse_embedding, reuse_region, drop_proportion)
+        x,saved_embedding,intermediate_data = self.backbone(samples.tensors, additional_data)
         # x = x[:, 1:,:]
         outputs_class = self.class_embed(x)
         outputs_coord = self.bbox_embed(x).sigmoid()
         out = {'pred_logits': outputs_class, 'pred_boxes': outputs_coord}
-        return out,saved_embedding,debug_data
+        return out,saved_embedding,intermediate_data
 
-    def forward_return_attention(self, samples: NestedTensor):
+    def forward_return_attention(self, samples: NestedTensor, additional_data: dict):
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
-        attention = self.backbone(samples.tensors,reuse_embedding=None, reuse_region=None, drop_proportion=None, return_attention=True)
+        attention = self.backbone(samples.tensors, additional_data, return_attention=True)
         return attention
 
 class ProgressivelyDrop(DropDetector):

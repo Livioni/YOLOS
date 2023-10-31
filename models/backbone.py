@@ -61,7 +61,7 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x, return_attention=False):
+    def forward(self, x, return_attention = False, det_token_index : list = None):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)  # 3, B, num_head, N, c
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
@@ -69,7 +69,13 @@ class Attention(nn.Module):
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
-
+        # if det_token_index is not None:
+        #     det_token_index += (N-100) * np.ones_like(det_token_index)
+        #     # det_token_index = sorted(det_token_index)
+        #     keep_token = torch.tensor(np.concatenate((np.arange(0,N-100), det_token_index), axis=0))
+        #     keep_token = keep_token.to(x.device)
+        #     attn = torch.index_select(attn, 3, keep_token)
+        #     v = torch.index_select(v, 2, keep_token)
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
@@ -92,8 +98,19 @@ class Block(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-    def forward(self, x, return_attention=False):
-        if return_attention:
+    def forward(self, x, return_attention=False, det_token_index : list = None):
+        if det_token_index is not None:
+            y, attn = self.attn(self.norm1(x), det_token_index = det_token_index,return_attention=return_attention)
+            x = x + self.drop_path(y)
+            x = x + self.drop_path(self.mlp(self.norm2(x)))
+            if det_token_index is not None:
+                det_token_index += (x.shape[1]-100) * np.ones_like(det_token_index)
+                keep_token = torch.tensor(np.concatenate((np.arange(0,x.shape[1]-100), det_token_index), axis=0))
+                keep_token = keep_token.to(x.device)
+                x = torch.index_select(x, 1, keep_token)
+            
+            return x, attn
+        elif return_attention:
             y, attn = self.attn(self.norm1(x), return_attention=return_attention)
             x = x + self.drop_path(y)
             x = x + self.drop_path(self.mlp(self.norm2(x)))
@@ -241,8 +258,8 @@ class ReuseEmbed(PatchEmbed):
             replace_embedding = reuse_embedding[:,:,row]
             embeddings_to_save[:,:,row] = replace_embedding
         embeddings = embeddings_to_save.transpose(1, 2)
-        debug_data = {'reuse_proportion': reuse_proportion}
-        return embeddings, embeddings_to_save, debug_data
+        intermediate_data = {'reuse_proportion': reuse_proportion}
+        return embeddings, embeddings_to_save, intermediate_data
 
 class DropEmbed(PatchEmbed):
     def __init__(self, img_size=[512, 864], patch_size=16, in_chans=3, embed_dim=384):
@@ -589,12 +606,16 @@ class VisionTransformerTokenReuse(VisionTransformer):
                  drop_path_rate=drop_path_rate, hybrid_backbone=hybrid_backbone, norm_layer=norm_layer, is_distill=is_distill)
         self.patch_embed = ReuseEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         
-    def forward_features(self, x, reuse_embedding, reuse_region, drop_propotion):
+    def forward_features(self, x, additional_data):
+        reuse_embedding = additional_data['reuse_embedding']
+        reuse_region = additional_data['reuse_region']
+        drop_proportion = additional_data['drop_proportion']
+        det_token_index = additional_data['det_token_index']
         # import pdb;pdb.set_trace()
         B, H, W = x.shape[0], x.shape[2], x.shape[3]
         # if (H,W) != self.img_size:
         #     self.finetune = True
-        x, saved_embedding,debug_data = self.patch_embed(x, reuse_embedding, reuse_region, drop_propotion)
+        x, saved_embedding,intermediate_data = self.patch_embed(x, reuse_embedding, reuse_region, drop_proportion)
         # interpolate init pe
         if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
             temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, img_size=(H,W))
@@ -608,13 +629,12 @@ class VisionTransformerTokenReuse(VisionTransformer):
             else:
                 temp_mid_pos_embed = self.mid_pos_embed
 
-
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         det_token = self.det_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x, det_token), dim=1)
         x = x + temp_pos_embed
         x = self.pos_drop(x)
-
+        block_attn = []
         for i in range(len((self.blocks))):
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(self.blocks[i], x)    # saves mem, takes time
@@ -625,8 +645,8 @@ class VisionTransformerTokenReuse(VisionTransformer):
                     x = x + temp_mid_pos_embed[i]
 
         x = self.norm(x)
-
-        return x[:, -self.det_token_num:, :],saved_embedding,debug_data
+        
+        return x[:, -self.det_token_num:, :],saved_embedding, intermediate_data
     
     def forward_return_all_selfattention(self, x):
         # import pdb;pdb.set_trace()
@@ -673,13 +693,13 @@ class VisionTransformerTokenReuse(VisionTransformer):
 
         return output
 
-    def forward(self, x, reuse_embedding, reuse_region, drop_proportion, return_attention=False):
+    def forward(self, x, additional_data=None, return_attention=False):
         if return_attention == True:
             # return self.forward_selfattention(x)
-            return self.forward_return_all_selfattention(x)
+            return self.forward_return_all_selfattention(x, additional_data)
         else:
-            x,saved_embedding,debug_data = self.forward_features(x, reuse_embedding, reuse_region, drop_proportion)
-            return x, saved_embedding, debug_data
+            x,saved_embedding,intermediate_data = self.forward_features(x, additional_data)
+            return x, saved_embedding, intermediate_data
 
 class VisionTransformerPatchDrop(VisionTransformer):
     """ Vision Transformer with support for patch or hybrid CNN input stage

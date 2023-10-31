@@ -113,7 +113,7 @@ def main(args):
     iou_types = tuple(k for k in ('segm', 'bbox') if k in postprocessors.keys())
     coco_evaluator = CocoEvaluator(base_ds, iou_types)
 
-    reuse_propotion = []
+    reuse_proportion = []
 
     for image_tensor,target in tqdm(data_loader_val):
         # outputs, debug_data = get_attention(model,image_tensor,target,args)
@@ -122,13 +122,13 @@ def main(args):
         results = postprocessors['bbox'](outputs, orig_target_sizes)
         res = {target[0]['image_id'].item(): results[0]}
         coco_evaluator.update(res)
-        # reuse_propotion.append(debug_data['reuse_proportion'])
+        # reuse_proportion.append(debug_data['reuse_proportion'])
 
     coco_evaluator.synchronize_between_processes()
     coco_evaluator.accumulate()
     coco_evaluator.summarize()
 
-    # print('Reuse Proportion: ', np.mean(reuse_propotion))
+    # print('Reuse Proportion: ', np.mean(reuse_proportion))
     return
 
 
