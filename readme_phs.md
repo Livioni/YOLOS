@@ -232,3 +232,15 @@ Reuse Proportion:  0.8203114300504226
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.421
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.800
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.401
+
+
+### Token_reuse_evaluate 
+python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前95% topk token
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.399
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.769
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.371
+
+python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前95% topk token 并且merge 剩下的5% token
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.400
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.770
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.371

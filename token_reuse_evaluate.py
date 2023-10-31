@@ -3,6 +3,7 @@ import torch,warnings,argparse,random,os
 from tqdm.contrib import tzip
 from pathlib import Path
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 import numpy as np
 from tools.patch_reuse_tools import rescale_bboxes,box_cxcywh_to_xyxy
 import util.misc as utils
@@ -80,6 +81,12 @@ def val_dataset_preporcess(args):
             cnt = 0
     return image_paths, reuse_image_paths
 
+def find_clue(block_attn_raw,block_attn):
+    block_atten_raw_matrix_list = [torch.mean(item.squeeze(0),dim=0) for item in block_attn_raw]
+    block_atten_matrix_list = [torch.mean(item.squeeze(0),dim=0)for item in block_attn]
+    cosine_similarity_list = [F.cosine_similarity(A, B, dim=0) for A, B in zip(block_atten_raw_matrix_list, block_atten_matrix_list)]
+    return
+
 def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
                           target_reuse,args):
     image_tensor = image_tensor.unsqueeze(0)
@@ -98,7 +105,6 @@ def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
                            'det_token_index':det_token_index}
         outputs_reference,saved_embedding,intermedia_data = model(reference_tensor,additional_data)
     
-    # visualize_attention(intermedia_data['block_attn'],save_path = 'attention_weights_raw.png')
     probas_reference = outputs_reference['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
     keep_reference = probas_reference.max(-1).values > 0.9
     # print(np.where(keep_reference==True))
@@ -115,10 +121,9 @@ def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
                            'reuse_region':reuse_region,\
                             'drop_proportion':args.drop_proportion,\
                             'det_token_index':None}
-        outputs,_,_ = model(input_tensor,additional_data)
+        outputs,_,intermedia_data_new = model(input_tensor,additional_data)
 
-    # visualize_attention(intermedia_data['block_attn'],save_path = 'attention_weights_2.png')
-    return outputs,intermedia_data
+    return outputs,intermedia_data_new
 
 
 def main(args):

@@ -1,6 +1,8 @@
 import torch,math
 import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
+from copy import deepcopy
 from functools import partial
 from einops import rearrange
 from .layers import DropPath, to_2tuple, trunc_normal_
@@ -605,7 +607,8 @@ class VisionTransformerTokenReuse(VisionTransformer):
                  num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale, drop_rate=drop_rate, attn_drop_rate=attn_drop_rate,
                  drop_path_rate=drop_path_rate, hybrid_backbone=hybrid_backbone, norm_layer=norm_layer, is_distill=is_distill)
         self.patch_embed = ReuseEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
-        
+        self.merge = False
+
     def forward_features(self, x, additional_data):
         reuse_embedding = additional_data['reuse_embedding']
         reuse_region = additional_data['reuse_region']
@@ -631,22 +634,48 @@ class VisionTransformerTokenReuse(VisionTransformer):
 
         cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         det_token = self.det_token.expand(B, -1, -1)
+        patch_num =  deepcopy(x.shape[1])
         x = torch.cat((cls_tokens, x, det_token), dim=1)
         x = x + temp_pos_embed
         x = self.pos_drop(x)
         block_attn = []
+        block_token = []
         for i in range(len((self.blocks))):
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(self.blocks[i], x)    # saves mem, takes time
             else:
-                x = self.blocks[i](x)
+                if reuse_embedding is not None and reuse_region is not None:
+                    x,attn = self.blocks[i](x, return_attention=True)
+                    if i in [3,6,9]:
+                        cls_attn, patch_attn, det_attn = attn[:,:,0,:], attn[:,:,1:-self.det_token_num,:], attn[:,:,-self.det_token_num:,:]
+                        patch_det_weight = patch_attn[:,:,:,-self.det_token_num:]
+                        patch_det_mean_weight = torch.mean(patch_det_weight,dim=1)
+                        patch_det_mean_weight = torch.mean(patch_det_mean_weight,dim=-1)
+                        drop_num = int(patch_num * 0.1)
+                        keep_num = patch_attn.shape[2] - drop_num
+                        _,topk_index = torch.topk(patch_det_mean_weight, keep_num, dim=1)
+                        topk_index = (torch.sort(topk_index,dim=1)[0][0]) 
+                        cls_token, patch_token, det_token = x[:,0,:], x[:,1:-self.det_token_num,:], x[:,-self.det_token_num:,:]
+                        new_patch_token = patch_token[:,topk_index,:]
+                        if self.merge:
+                            all_index = torch.arange(patch_det_weight.shape[2])
+                            complement_set = torch.tensor([x for x in all_index if x not in topk_index])
+                            merge_token = patch_token[:,complement_set,:]
+                            merge_token = torch.mean(merge_token,dim=1).unsqueeze(0)
+                            x = torch.cat((cls_token.unsqueeze(1), new_patch_token, merge_token, det_token), dim=1)
+                        else:
+                            x = torch.cat((cls_token.unsqueeze(1), new_patch_token, det_token), dim=1)
+                else:
+                    x,attn = self.blocks[i](x, return_attention=True)
             if self.has_mid_pe:
                 if i < (self.depth - 1):
                     x = x + temp_mid_pos_embed[i]
-
+            block_attn.append(attn)
+            block_token.append(x)
         x = self.norm(x)
-        
-        return x[:, -self.det_token_num:, :],saved_embedding, intermediate_data
+        intermediate_data['patch_embedding'] = saved_embedding
+        intermediate_data['block_attn'] = block_attn
+        return x[:, -self.det_token_num:, :], saved_embedding, intermediate_data
     
     def forward_return_all_selfattention(self, x):
         # import pdb;pdb.set_trace()
