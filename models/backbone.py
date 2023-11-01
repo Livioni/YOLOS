@@ -761,11 +761,18 @@ class DynamicVisionTransformer(VisionTransformer):
         x = self.norm(x)
 
         if self.training:
-            return x, out_pred_prob
+            return x[:, -self.det_token_num:, :], out_pred_prob
         else:
             return x[:, -self.det_token_num:, :], None
-
-
+        
+    def forward(self, x, return_attention=False):
+        if return_attention == True:
+            # return self.forward_selfattention(x)
+            return self.forward_return_all_selfattention(x)
+        else:
+            x, out_pred_prob = self.forward_features(x)
+            return x, out_pred_prob
+        
 class VisionTransformerTokenMerging(VisionTransformer):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop_rate=0, attn_drop_rate=0, drop_path_rate=0, hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False, det_token_num=100):
         super().__init__(img_size, patch_size, in_chans, num_classes, embed_dim, depth, num_heads, mlp_ratio, qkv_bias, qk_scale, drop_rate, attn_drop_rate, drop_path_rate, hybrid_backbone, norm_layer, is_distill)
