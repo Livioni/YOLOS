@@ -8,6 +8,7 @@ from einops import rearrange
 from .layers import DropPath, to_2tuple, trunc_normal_
 import torch.utils.checkpoint as checkpoint 
 from models.tome_merge import bipartite_soft_matching, merge_source, merge_wavg
+from models.utils import batch_index_select
 
 def complement_idx(idx, dim):
     """
@@ -31,6 +32,34 @@ def complement_idx(idx, dim):
     compl = compl.permute(-1, *tuple(range(ndim - 1)))
     compl = compl[n_idx:].permute(*(tuple(range(1, ndim)) + (0,)))
     return compl
+
+class PredictorLG(nn.Module):
+    """ Image to Patch Embedding
+    """
+    def __init__(self, embed_dim=192):
+        super().__init__()
+        self.in_conv = nn.Sequential(
+            nn.LayerNorm(embed_dim),
+            nn.Linear(embed_dim, embed_dim),
+            nn.GELU()
+        )
+
+        self.out_conv = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim // 2),
+            nn.GELU(),
+            nn.Linear(embed_dim // 2, embed_dim // 4),
+            nn.GELU(),
+            nn.Linear(embed_dim // 4, 2),
+            nn.LogSoftmax(dim=-1)
+        )
+
+    def forward(self, x, policy):
+        x = self.in_conv(x)
+        B, N, C = x.size()
+        local_x = x[:,:, :C//2]
+        global_x = (x[:,:, C//2:] * policy).sum(dim=1, keepdim=True) / torch.sum(policy, dim=1, keepdim=True)
+        x = torch.cat([local_x, global_x.expand(B, N, C//2)], dim=-1)
+        return self.out_conv(x)
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -85,7 +114,53 @@ class Attention(nn.Module):
             return x, attn
         else:
             return x
-        
+
+class DynamicAttention(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
+        self.scale = qk_scale or head_dim ** -0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def softmax_with_policy(self, attn, policy, eps=1e-6):
+        B, N, _ = policy.size()
+        B, H, N, N = attn.size()
+        attn_policy = policy.reshape(B, 1, 1, N)  # * policy.reshape(B, 1, N, 1)
+        eye = torch.eye(N, dtype=attn_policy.dtype, device=attn_policy.device).view(1, 1, N, N)
+        attn_policy = attn_policy + (1.0 - attn_policy) * eye
+        max_att = torch.max(attn, dim=-1, keepdim=True)[0]
+        attn = attn - max_att
+        # attn = attn.exp_() * attn_policy
+        # return attn / attn.sum(dim=-1, keepdim=True)
+
+        # for stable training
+        attn = attn.to(torch.float32).exp_() * attn_policy.to(torch.float32)
+        attn = (attn + eps/N) / (attn.sum(dim=-1, keepdim=True) + eps)
+        return attn.type_as(max_att)
+
+    def forward(self, x, policy):
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
+
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+
+        if policy is None:
+            attn = attn.softmax(dim=-1)
+        else:
+            attn = self.softmax_with_policy(attn, policy)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
 class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
@@ -121,7 +196,25 @@ class Block(nn.Module):
             x = x + self.drop_path(self.attn(self.norm1(x)))
             x = x + self.drop_path(self.mlp(self.norm2(x)))
             return x
-        
+
+class DynamicBlock(nn.Module):
+    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.norm1 = norm_layer(dim)
+        self.attn = DynamicAttention(
+            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
+        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+        self.norm2 = norm_layer(dim)
+        mlp_hidden_dim = int(dim * mlp_ratio)
+        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+
+    def forward(self, x, policy=None):
+        x = x + self.drop_path(self.attn(self.norm1(x), policy=policy))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        return x        
+
 class AttentivenessBlock(Block):
     def __init__(self, dim, num_heads, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop=0, attn_drop=0, drop_path=0, act_layer=nn.GELU, norm_layer=nn.LayerNorm,\
                  fuse_token=False, det_token_num=100, keep_rate=0.9):
@@ -586,6 +679,93 @@ class VisionTransformer(nn.Module):
             x = self.forward_features(x)
             return x
 
+class DynamicVisionTransformer(VisionTransformer):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=False, qk_scale=None,\
+                  drop_rate=0, attn_drop_rate=0, drop_path_rate=0, hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False, pruning_loc = [3,6,9],\
+                  keep_rate = 0.9):
+        super().__init__(img_size, patch_size, in_chans, num_classes, embed_dim, depth, num_heads, mlp_ratio, qkv_bias, qk_scale, drop_rate, attn_drop_rate, drop_path_rate, hybrid_backbone, norm_layer, is_distill)
+        self.pruning_loc = pruning_loc
+        self.token_ratio = [keep_rate, keep_rate ** 2, keep_rate ** 3]
+        predictor_list = [PredictorLG(embed_dim) for _ in range(len(pruning_loc))]
+        self.score_predictor = nn.ModuleList(predictor_list)
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        self.blocks = nn.ModuleList([
+            DynamicBlock(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+            for i in range(depth)])
+
+    def forward_features(self, x):
+        # import pdb;pdb.set_trace()
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+
+        # if (H,W) != self.img_size:
+        #     self.finetune = True
+
+        x = self.patch_embed(x)
+        # interpolate init pe
+        if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
+            temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, img_size=(H,W))
+        else:
+            temp_pos_embed = self.pos_embed
+        # interpolate mid pe
+        if self.has_mid_pe:
+            # temp_mid_pos_embed = []
+            if (self.mid_pos_embed.shape[2] - 1 - self.det_token_num) != x.shape[1]:
+                temp_mid_pos_embed = self.InterpolateMidPosEmbed(self.mid_pos_embed, img_size=(H,W))
+            else:
+                temp_mid_pos_embed = self.mid_pos_embed
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        det_token = self.det_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x, det_token), dim=1)
+        x = x + temp_pos_embed
+        x = self.pos_drop(x)
+
+        ##############Dynamic ViT################
+        p_count = 0
+        out_pred_prob = []
+        init_n = H//self.patch_size * W//self.patch_size
+        prev_decision = torch.ones(B, init_n, 1, dtype=x.dtype, device=x.device)
+        policy = torch.ones(B, init_n + 101, 1, dtype=x.dtype, device=x.device)
+        for i, blk in enumerate(self.blocks):
+            if i in self.pruning_loc:
+                spatial_x = x[:, 1:-self.det_token_num, :]
+                pred_score = self.score_predictor[p_count](spatial_x, prev_decision).reshape(B, -1, 2)
+                if self.training:
+                    hard_keep_decision = F.gumbel_softmax(pred_score, hard=True)[:, :, 0:1] * prev_decision
+                    out_pred_prob.append(hard_keep_decision.reshape(B, init_n))
+                    cls_policy = torch.ones(B, 1, 1, dtype=hard_keep_decision.dtype, device=hard_keep_decision.device)
+                    det_policy = torch.ones(B, 100, 1, dtype=hard_keep_decision.dtype, device=hard_keep_decision.device)
+                    policy = torch.cat([cls_policy, hard_keep_decision, det_policy], dim=1)
+                    x = blk(x, policy=policy)
+                    prev_decision = hard_keep_decision
+                else:
+                    score = pred_score[:,:,0]
+                    num_keep_node = int(init_n * self.token_ratio[p_count])
+                    keep_policy = torch.argsort(score, dim=1, descending=True)[:, :num_keep_node]
+                    cls_policy = torch.zeros(B, 1, dtype=keep_policy.dtype, device=keep_policy.device)
+                    keep_det = torch.arange(start=x.shape[1]-self.det_token_num, end=x.shape[1], dtype=keep_policy.dtype, device=keep_policy.device)
+                    det_policy = keep_det.unsqueeze(0).expand(B, -1)
+                    now_policy = torch.cat([cls_policy, keep_policy + 1, det_policy], dim=1)
+                    x = batch_index_select(x, now_policy)
+                    prev_decision = batch_index_select(prev_decision, keep_policy)
+                    x = blk(x)
+                p_count += 1
+            else:
+                if self.training:
+                    x = blk(x, policy)
+                else:
+                    x = blk(x)
+
+        x = self.norm(x)
+
+        if self.training:
+            return x, out_pred_prob
+        else:
+            return x[:, -self.det_token_num:, :], None
+
+
 class VisionTransformerTokenMerging(VisionTransformer):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=False, qk_scale=None, drop_rate=0, attn_drop_rate=0, drop_path_rate=0, hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False, det_token_num=100):
         super().__init__(img_size, patch_size, in_chans, num_classes, embed_dim, depth, num_heads, mlp_ratio, qkv_bias, qk_scale, drop_rate, attn_drop_rate, drop_path_rate, hybrid_backbone, norm_layer, is_distill)
@@ -993,6 +1173,21 @@ def token_reorganizations_tiny(pretrained=None, keep_rate = 1.0, **kwargs):
     model = VisionTransformerTokenReorganizations(
                 patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
                 norm_layer=partial(nn.LayerNorm, eps=1e-6),keep_rate=keep_rate)
+    if pretrained: 
+        # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_tiny_patch16_224-a1311bcf.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 192
+
+def dynamic_tiny(pretrained=None, **kwargs):
+    model = DynamicVisionTransformer(
+                patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6), pruning_loc=[3,6,9], keep_rate=0.9,\
+                )
     if pretrained: 
         # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
         # checkpoint = torch.hub.load_state_dict_from_url(

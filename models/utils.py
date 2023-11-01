@@ -103,3 +103,23 @@ def parse_r(num_layers: int, r: Union[List[int], Tuple[int, float], int]) -> Lis
     step = (max_val - min_val) / (num_layers - 1)
 
     return [int(min_val + step * i) for i in range(num_layers)]
+
+def batch_index_select(x, idx):
+    if len(x.size()) == 3:
+        B, N, C = x.size()
+        N_new = idx.size(1)
+        offset = torch.arange(B, dtype=torch.long, device=x.device).view(B, 1) * N
+        idx = idx + offset
+        out = x.reshape(B*N, C)[idx.reshape(-1)].reshape(B, N_new, C)
+        return out
+    elif len(x.size()) == 2:
+        B, N = x.size()
+        N_new = idx.size(1)
+        offset = torch.arange(B, dtype=torch.long, device=x.device).view(B, 1) * N
+        idx = idx + offset
+        out = x.reshape(B*N)[idx.reshape(-1)].reshape(B, N_new)
+        return out
+    else:
+        raise NotImplementedError
+    
+    

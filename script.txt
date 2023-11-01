@@ -45,3 +45,6 @@ python main.py --coco_path /home/xns/phs/dataset/MOT15_coco --backbone_name base
 python token_reuse_evaluate.py --drop_proportion 1.0 --max_reuse_frame 1 --backbone_name tiny --resume results/MOT15Det_tiny/checkpoint0299.pth --dataset_file mot15
 
 python token_reuse_evaluate.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco --drop_proportion 1.0 --max_reuse_frame 1 --backbone_name tiny --resume results/MOT15Det_tiny/checkpoint0299.pth --dataset_file mot15
+
+
+python DynamicYOLOS.py --coco_path /home/livion/Documents/github/dataset/MOT15_coco/ --batch_size 2 --lr 5e-5 --epochs 200 --backbone_name tiny --init_pe_size 800 1333--output_dir results/DynamicYOLOS_tiny --eval_size 521 --dataset_file mot15 --resume raw_weights/DynamicYOLOS_tiny.pth
