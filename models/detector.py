@@ -721,7 +721,7 @@ def build_dynamic(args):
         # keep_rate=args.keep_rate #剪枝保留率
     )
     matcher = build_matcher(args)
-    weight_dict = {'loss_ce': 1, 'loss_bbox': args.bbox_loss_coef}
+    weight_dict = {'loss_ce': 1, 'loss_bbox': args.bbox_loss_coef,'loss_ratio': 10/3}
     weight_dict['loss_giou'] = args.giou_loss_coef
     # TODO this is a hack
     # if args.aux_loss:

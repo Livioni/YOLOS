@@ -189,8 +189,6 @@ def main(args):
     else:
         base_ds = get_coco_api_from_dataset(dataset_val)
 
-
-
     output_dir = Path(args.output_dir)
     if args.resume:
         if args.resume.startswith('https'):
