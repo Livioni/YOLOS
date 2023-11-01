@@ -364,7 +364,7 @@ class SetCriterion(nn.Module):
                 indices = self.matcher(aux_outputs, targets)
                 for loss in self.losses:
                     if loss == 'masks':
-                        # Intermediate masks losses are too costly to compute, we ignore them.
+                        # intermediate masks losses are too costly to compute, we ignore them.
                         continue
                     kwargs = {}
                     if loss == 'labels':

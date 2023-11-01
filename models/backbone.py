@@ -608,12 +608,14 @@ class VisionTransformerTokenReuse(VisionTransformer):
                  drop_path_rate=drop_path_rate, hybrid_backbone=hybrid_backbone, norm_layer=norm_layer, is_distill=is_distill)
         self.patch_embed = ReuseEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
         self.merge = False
+        self.replace = False
 
     def forward_features(self, x, additional_data):
         reuse_embedding = additional_data['reuse_embedding']
         reuse_region = additional_data['reuse_region']
         drop_proportion = additional_data['drop_proportion']
         det_token_index = additional_data['det_token_index']
+        reuse_block_token = None if 'block_token' not in additional_data else additional_data['block_token']
         # import pdb;pdb.set_trace()
         B, H, W = x.shape[0], x.shape[2], x.shape[3]
         # if (H,W) != self.img_size:
@@ -644,8 +646,8 @@ class VisionTransformerTokenReuse(VisionTransformer):
             if self.use_checkpoint:
                 x = checkpoint.checkpoint(self.blocks[i], x)    # saves mem, takes time
             else:
+                x,attn = self.blocks[i](x, return_attention=True)
                 if reuse_embedding is not None and reuse_region is not None:
-                    x,attn = self.blocks[i](x, return_attention=True)
                     if i in [3,6,9]:
                         cls_attn, patch_attn, det_attn = attn[:,:,0,:], attn[:,:,1:-self.det_token_num,:], attn[:,:,-self.det_token_num:,:]
                         patch_det_weight = patch_attn[:,:,:,-self.det_token_num:]
@@ -656,7 +658,17 @@ class VisionTransformerTokenReuse(VisionTransformer):
                         _,topk_index = torch.topk(patch_det_mean_weight, keep_num, dim=1)
                         topk_index = (torch.sort(topk_index,dim=1)[0][0]) 
                         cls_token, patch_token, det_token = x[:,0,:], x[:,1:-self.det_token_num,:], x[:,-self.det_token_num:,:]
-                        new_patch_token = patch_token[:,topk_index,:]
+                        new_patch_token = patch_token.clone()
+                        if self.replace:
+                            all_index = torch.arange(patch_det_weight.shape[2])
+                            mask = torch.ones(all_index.shape[0], dtype=torch.bool)
+                            mask[topk_index] = False
+                            # 使用该 mask 从 all_index 中选出补集
+                            complement_set = all_index[mask]
+                            reuse_token = reuse_block_token[i][:,complement_set,:]
+                            new_patch_token[:,complement_set,:] = reuse_token
+                        else:
+                            new_patch_token = patch_token[:,topk_index,:]
                         if self.merge:
                             all_index = torch.arange(patch_det_weight.shape[2])
                             complement_set = torch.tensor([x for x in all_index if x not in topk_index])
@@ -665,8 +677,6 @@ class VisionTransformerTokenReuse(VisionTransformer):
                             x = torch.cat((cls_token.unsqueeze(1), new_patch_token, merge_token, det_token), dim=1)
                         else:
                             x = torch.cat((cls_token.unsqueeze(1), new_patch_token, det_token), dim=1)
-                else:
-                    x,attn = self.blocks[i](x, return_attention=True)
             if self.has_mid_pe:
                 if i < (self.depth - 1):
                     x = x + temp_mid_pos_embed[i]
@@ -675,6 +685,7 @@ class VisionTransformerTokenReuse(VisionTransformer):
         x = self.norm(x)
         intermediate_data['patch_embedding'] = saved_embedding
         intermediate_data['block_attn'] = block_attn
+        intermediate_data['block_token'] = block_token
         return x[:, -self.det_token_num:, :], saved_embedding, intermediate_data
     
     def forward_return_all_selfattention(self, x):

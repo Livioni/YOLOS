@@ -10,6 +10,10 @@
 - **token_merge.py**: TOKEN Merging : Your ViT But Faster
 - **token_reorganizations** : token_reorganizations ICLR'22
   
+## History
+- 2023.11.1-1 保存token_reuse_evaluate.py 其中 self.merge self.replace功能，merge表示丢弃的一部分token经过average weights后重新形成一个token加入到patch token后面，replace功能表示丢弃的一部分attention weight不太重要的token并用base frame 的token代替，效果都不是太好，探索学习的方法。
+
+
 ## Result 
 ### YOLOS Base
 1. 使用raw YOLOS_B，results/MOT15Det_base/checkpoint0199.pth：
@@ -244,3 +248,13 @@ python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.400
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.770
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.371
+
+python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] replace 剩下的10%不重要的token
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.400
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.766
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.372
+
+python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前90% topk token
+    Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.367
+    Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.731
+    Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.331

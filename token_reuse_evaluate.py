@@ -103,7 +103,7 @@ def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
                            'reuse_region':reuse_region,\
                            'drop_proportion':args.drop_proportion,\
                            'det_token_index':det_token_index}
-        outputs_reference,saved_embedding,intermedia_data = model(reference_tensor,additional_data)
+        outputs_reference,saved_embedding,intermediate_data = model(reference_tensor,additional_data)
     
     probas_reference = outputs_reference['pred_logits'].softmax(-1)[0, :, :-1].to('cpu')
     keep_reference = probas_reference.max(-1).values > 0.9
@@ -120,10 +120,11 @@ def token_reuse_inference(model,image_tensor,target,reuse_image_tensor,\
         additional_data = {'reuse_embedding':reuse_embedding,\
                            'reuse_region':reuse_region,\
                             'drop_proportion':args.drop_proportion,\
-                            'det_token_index':None}
-        outputs,_,intermedia_data_new = model(input_tensor,additional_data)
+                            'det_token_index':None,\
+                            'block_token':intermediate_data['block_token']}
+        outputs,_,intermediate_data_new = model(input_tensor,additional_data)
 
-    return outputs,intermedia_data_new
+    return outputs,intermediate_data_new
 
 
 def main(args):
