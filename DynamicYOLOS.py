@@ -142,19 +142,19 @@ def main(args):
         for name, param in model.named_parameters():
             if "backbone" not in name and param.requires_grad:
                 head.append(param)
-            # if "backbone" in name and param.requires_grad:
-            #     if len(param.shape) == 1 or name.endswith(".bias") or name.split('.')[-1] in skip:
-            #         backbone_no_decay.append(param)
-            #     else:
-            #         backbone_decay.append(param)
+            if "backbone" in name and "score_predictor" not in name and param.requires_grad:
+                if len(param.shape) == 1 or name.endswith(".bias") or name.split('.')[-1] in skip:
+                    backbone_no_decay.append(param)
+                else:
+                    backbone_decay.append(param)
             if "score_predictor" in name and param.requires_grad:
                 score_predictor.append(param)
 
         param_dicts = [
             {"params": head},
-            {"params": score_predictor},
-            # {"params": backbone_no_decay, "weight_decay": 0., "lr": args.lr},
-            # {"params": backbone_decay, "lr": args.lr},
+            {"params": score_predictor,"lr": args.lr},
+            {"params": backbone_no_decay, "weight_decay": 0., "lr": args.lr/10},
+            {"params": backbone_decay, "lr": args.lr/10},
         ]
         optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
                                   weight_decay=args.weight_decay)
