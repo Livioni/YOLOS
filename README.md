@@ -15,9 +15,25 @@
 - 2023.11.1-2 复现第一版的DynamicViT
 - 2023.11.1-2.1 调整了DynamicViT
 - 2023.11.1-2.2 调整了DynamicViT
+- 2023.11.2-1 更新了DynamicYOLOS Tiny的训练结果，以[0.9,0.9^2,0.9^3]为参数训练的Dynamic ViT，冻结的Backboe, 仅训练head 和 predictor, epoch=200, AP丢失0.031=3.1%
 
+## Weights
+1. results/DynamicYOLOS_tiny/DynamicYOLOS199_tiny.pth 以[0.9,0.9^2,0.9^3]为参数训练的Dynamic ViT，冻结的Backboe, 仅训练head 和 predictor, epoch=200。
 
 ## Result 
+
+### Dynamic YOLOS
+
+<details>
+<summary>Eval DynamicYOLOS199_tiny.pth 前向过程中在第[3,6,9]个block后只保留[0.9,0.81,0.729]的det-token</summary>
+<pre><code>
+ Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.402
+ Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.785
+ Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.366
+</code></pre>
+</details>
+
+
 ### YOLOS Base
 1. 使用raw YOLOS_B，results/MOT15Det_base/checkpoint0199.pth：
    
@@ -44,7 +60,9 @@
         results/MOT15Det_tiny/checkpoint0299.pth，并且用真值反馈
 
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.432
+
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.802
+
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.415
      
 3. 使用 **token_reuse_evaluate.py**, reuse_frame = 3, drop_proportion = 1.0\
@@ -343,24 +361,34 @@ Reuse Proportion:  0.8203114300504226
 
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.401
 
-3. 
-python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前95% topk token
+3. python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前95% topk token
+
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.399
+
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.769
+
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.371
 
-4. 
-python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前95% topk token 并且merge 剩下的5% token
+4. python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前95% topk token 并且merge 剩下的5% token
+
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.400
+
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.770
+
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.371
 
-python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] replace 剩下的10%不重要的token
+5. python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] replace 剩下的10%不重要的token
+
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.400
+
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.766
+
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.372
 
-python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前90% topk token
+6. python token_reuse_evaluate.py --max_reuse_frame 5 --drop_proportion 1.0 block [3,6,9] 保留前90% topk token
+
     Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.367
+
     Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.731
+
     Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.331
