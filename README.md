@@ -20,6 +20,7 @@
 - 2023.11.2-1.2 格式化readme
 - 2023.11.2-1.3 readme插入图片
 - 2023.11.2-2.0 尝试调整backbone的学习率，让backbone lr/1，predictor lr，难以达到近乎原始的效果。下一步复现SViT
+- 2023.11.2-3.0 复现SViT开始训练
 
 ## Weights
 1. results/DynamicYOLOS_tiny/DynamicYOLOS199_tiny.pth 以[0.9,0.9^2,0.9^3]为参数训练的Dynamic ViT，冻结的Backboe, 仅训练head 和 predictor, epoch=200。

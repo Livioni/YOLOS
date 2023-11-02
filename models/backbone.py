@@ -60,6 +60,19 @@ class PredictorLG(nn.Module):
         global_x = (x[:,:, C//2:] * policy).sum(dim=1, keepdim=True) / torch.sum(policy, dim=1, keepdim=True)
         x = torch.cat([local_x, global_x.expand(B, N, C//2)], dim=-1)
         return self.out_conv(x)
+    
+class SViTPredictor(nn.Module):
+    """ Image to Patch Embedding
+    """
+    def __init__(self, embed_dim=192):
+        super().__init__()
+        self.predict = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim//4),
+            nn.Linear(embed_dim//4, 2)
+        )
+
+    def forward(self, x):
+        return self.predict(x)
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -679,6 +692,121 @@ class VisionTransformer(nn.Module):
             x = self.forward_features(x)
             return x
 
+class SViT(VisionTransformer):
+    def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=False, qk_scale=None,\
+                  drop_rate=0, attn_drop_rate=0, drop_path_rate=0, hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False, pruning_loc = [3,4,5,6,7,8,9,10,11],\
+                  keep_rate = [0.7,0.7,0.7,0.49,0.49,0.49,0.343,0.343,0.343]):
+        super().__init__(img_size, patch_size, in_chans, num_classes, embed_dim, depth, num_heads, mlp_ratio, qkv_bias, qk_scale, drop_rate, attn_drop_rate, drop_path_rate, hybrid_backbone, norm_layer, is_distill)
+        self.pruning_loc = pruning_loc
+        self.token_ratio = keep_rate
+        predictor_list = [SViTPredictor(embed_dim) for _ in range(len(pruning_loc))]
+        self.score_predictor = nn.ModuleList(predictor_list)
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        self.blocks = nn.ModuleList([
+            DynamicBlock(
+                dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+            for i in range(depth)])
+
+    def forward_features(self, x):
+        # import pdb;pdb.set_trace()
+        B, H, W = x.shape[0], x.shape[2], x.shape[3]
+
+        # if (H,W) != self.img_size:
+        #     self.finetune = True
+
+        x = self.patch_embed(x)
+        # interpolate init pe
+        if (self.pos_embed.shape[1] - 1 - self.det_token_num) != x.shape[1]:
+            temp_pos_embed = self.InterpolateInitPosEmbed(self.pos_embed, img_size=(H,W))
+        else:
+            temp_pos_embed = self.pos_embed
+        # interpolate mid pe
+        if self.has_mid_pe:
+            # temp_mid_pos_embed = []
+            if (self.mid_pos_embed.shape[2] - 1 - self.det_token_num) != x.shape[1]:
+                temp_mid_pos_embed = self.InterpolateMidPosEmbed(self.mid_pos_embed, img_size=(H,W))
+            else:
+                temp_mid_pos_embed = self.mid_pos_embed
+
+        cls_tokens = self.cls_token.expand(B, -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        det_token = self.det_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x, det_token), dim=1)
+        x = x + temp_pos_embed
+        x = self.pos_drop(x)
+
+        ##############Dynamic ViT################
+        p_count = 0
+        out_pred_prob = []
+        init_n = H//self.patch_size * W//self.patch_size
+        policy = torch.ones(B, init_n + 101, 1, dtype=x.dtype, device=x.device)
+        for i, blk in enumerate(self.blocks):
+            if i in self.pruning_loc:
+                spatial_x = x[:, 1:-self.det_token_num, :]
+                pred_score = self.score_predictor[p_count](spatial_x)
+                if self.training:
+                    hard_keep_decision = F.gumbel_softmax(pred_score, hard=True)[:, :, 0:1]
+                    out_pred_prob.append(hard_keep_decision.reshape(B, init_n))
+                    cls_policy = torch.ones(B, 1, 1, dtype=hard_keep_decision.dtype, device=hard_keep_decision.device)
+                    det_policy = torch.ones(B, 100, 1, dtype=hard_keep_decision.dtype, device=hard_keep_decision.device)
+                    policy = torch.cat([cls_policy, hard_keep_decision, det_policy], dim=1)
+                    reuse_token = x.clone()
+                    selected_x = blk(x, policy=policy)
+                    mask = policy.bool().expand(-1, -1, 192)
+                    x = torch.where(mask, selected_x, reuse_token)
+                else:
+                    score = pred_score[:,:,0]
+                    num_keep_node = int(init_n * self.token_ratio[p_count])
+                    keep_policy = torch.argsort(score, dim=1, descending=True)[:, :num_keep_node]
+                    cls_policy = torch.ones(B, 1, dtype=keep_policy.dtype, device=keep_policy.device)
+                    keep_det = torch.arange(start=x.shape[1]-self.det_token_num, end=x.shape[1], dtype=keep_policy.dtype, device=keep_policy.device)
+                    det_policy = keep_det.unsqueeze(0).expand(B, -1)
+                    now_policy = torch.cat([cls_policy, keep_policy + 1, det_policy], dim=1)
+                    selected_x = batch_index_select(x, now_policy)
+                    # 对选中的token应用blk
+                    processed_x = blk(selected_x)
+                    # 创建一个新的tensor，大小与原始x相同，用于存放最终结果
+                    final_x = torch.empty_like(x)
+                    # 将经过处理的token插入到最终结果中
+                    # 创建一个布尔掩码，用于确定now_policy中的位置
+                    mask = torch.zeros_like(x, dtype=torch.bool)
+                    mask.scatter_(1, now_policy.unsqueeze(-1).expand(-1, -1, x.size(-1)), 1)
+                    # 将未经处理的token放入final_x
+                    final_x[~mask] = x[~mask]
+                    # 将经过处理的token放入final_x
+                    # 需要保留mask中True的索引
+                    mask_indices = mask.nonzero(as_tuple=True)
+                    # 创建一个序列，包含0到B-1的数字，用于索引批次
+                    batch_indices = torch.arange(B, device=x.device)
+                    # 为每个批次应用对应的now_policy中的indices
+                    for i in range(B):
+                        batch_mask = batch_indices == i
+                        selected_indices = now_policy[i]
+                        final_x[batch_mask, selected_indices] = processed_x[i]
+                    x = final_x
+                p_count += 1
+            else:
+                if self.training:
+                    x = blk(x, policy)
+                else:
+                    x = blk(x)
+
+        x = self.norm(x)
+
+        if self.training:
+            return x[:, -self.det_token_num:, :], out_pred_prob
+        else:
+            return x[:, -self.det_token_num:, :], None
+        
+    def forward(self, x, return_attention=False):
+        if return_attention == True:
+            # return self.forward_selfattention(x)
+            return self.forward_return_all_selfattention(x)
+        else:
+            x, out_pred_prob = self.forward_features(x)
+            return x, out_pred_prob
+
+
 class DynamicVisionTransformer(VisionTransformer):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=False, qk_scale=None,\
                   drop_rate=0, attn_drop_rate=0, drop_path_rate=0, hybrid_backbone=None, norm_layer=nn.LayerNorm, is_distill=False, pruning_loc = [3,6,9],\
@@ -1194,6 +1322,23 @@ def dynamic_tiny(pretrained=None, **kwargs):
     model = DynamicVisionTransformer(
                 patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
                 norm_layer=partial(nn.LayerNorm, eps=1e-6), pruning_loc=[3,6,9], keep_rate=0.9,\
+                )
+    if pretrained: 
+        # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")
+        # checkpoint = torch.hub.load_state_dict_from_url(
+        #     url="https://dl.fbaipublicfiles.com/deit/deit_tiny_patch16_224-a1311bcf.pth",
+        #     map_location="cpu", check_hash=True
+        # )
+        checkpoint = torch.load(pretrained, map_location="cpu")
+        model.load_state_dict(checkpoint["model"], strict=False)
+    return model, 192
+
+
+def svit_tiny(pretrained=None, **kwargs):
+    model = SViT(
+                patch_size=16, embed_dim=192, depth=12, num_heads=3, mlp_ratio=4, qkv_bias=True,
+                norm_layer=partial(nn.LayerNorm, eps=1e-6), pruning_loc=[3,4,5,6,7,8,9,10,11],\
+                keep_rate=[0.7,0.7,0.7,0.49,0.49,0.49,0.343,0.343,0.343],\
                 )
     if pretrained: 
         # checkpoint = torch.load('deit_tiny_patch16_224-a1311bcf.pth', map_location="cpu")

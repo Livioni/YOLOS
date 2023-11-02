@@ -94,6 +94,35 @@ class DynamicDetector(Detector):
         outputs_coord = self.bbox_embed(x).sigmoid()
         out = {'pred_logits': outputs_class, 'pred_boxes': outputs_coord, 'out_pred_prob':out_pred_prob}
         return out
+    
+class SViTDetector(Detector):
+    def __init__(self, num_classes, pre_trained=None, det_token_num=100, backbone_name='tiny', init_pe_size=[800, 1344], mid_pe_size=None, use_checkpoint=False,\
+                 pruning_loc = [3,4,5,6,7,8,9,10,11], keep_rate=[0.7,0.7,0.7,0.49,0.49,0.49,0.343,0.343,0.343]):
+        super().__init__(num_classes, pre_trained, det_token_num, backbone_name, init_pe_size, mid_pe_size, use_checkpoint)
+        if backbone_name == 'tiny':
+            self.backbone, hidden_dim = svit_tiny(pretrained=pre_trained, pruning_loc=pruning_loc,\
+                                                     keep_rate=keep_rate)
+        elif backbone_name == 'small':
+            self.backbone, hidden_dim = small(pretrained=pre_trained)
+        elif backbone_name == 'base':
+            self.backbone, hidden_dim = base(pretrained=pre_trained)
+        elif backbone_name == 'small_dWr':
+            self.backbone, hidden_dim = small_dWr(pretrained=pre_trained)
+        else:
+            raise ValueError(f'backbone {backbone_name} not supported')
+        
+        self.backbone.finetune_det(det_token_num=det_token_num, img_size=init_pe_size, mid_pe_size=mid_pe_size, use_checkpoint=use_checkpoint)
+
+    def forward(self, samples: NestedTensor):
+        # import pdb;pdb.set_trace()
+        if isinstance(samples, (list, torch.Tensor)):
+            samples = nested_tensor_from_tensor_list(samples)
+        x,out_pred_prob = self.backbone(samples.tensors)
+        # x = x[:, 1:,:]
+        outputs_class = self.class_embed(x)
+        outputs_coord = self.bbox_embed(x).sigmoid()
+        out = {'pred_logits': outputs_class, 'pred_boxes': outputs_coord, 'out_pred_prob':out_pred_prob}
+        return out
 
 class DropDetector(nn.Module):
     def __init__(self, num_classes, pre_trained=None, det_token_num=100, backbone_name='tiny', init_pe_size=[800,1344], mid_pe_size=None, use_checkpoint=False):
@@ -732,7 +761,65 @@ def build_dynamic(args):
 
     losses = ['labels', 'boxes', 'cardinality', 'ratio']
     criterion = SetDynamicCriterion(num_classes, matcher=matcher, weight_dict=weight_dict,
-                             eos_coef=args.eos_coef, losses=losses)
+                             eos_coef=args.eos_coef, losses=losses, keep_ratio = [0.9,0.9**2,0.9**3])
+    criterion.to(device)
+    postprocessors = {'bbox': PostProcess()}
+
+    return model, criterion, postprocessors
+
+def build_svit(args):
+    # the `num_classes` naming here is somewhat misleading.
+    # it indeed corresponds to `max_obj_id + 1`, where max_obj_id
+    # is the maximum id for a class in your dataset. For example,
+    # COCO has a max_obj_id of 90, so we pass `num_classes` to be 91.
+    # As another example, for a dataset that has a single class with id 1,
+    # you should pass `num_classes` to be 2 (max_obj_id + 1).
+    # For more details on this, check the following discussion
+    # https://github.com/facebookresearch/detr/issues/108#issuecomment-650269223
+    num_classes = 20 
+    if args.dataset_file != 'coco':
+        num_classes = 1
+    elif args.dataset_file == 'pandas':
+        num_classes = 1
+    elif args.dataset_file == 'mot17':
+        num_classes = 1
+    elif args.dataset_file == 'mot15':
+        num_classes = 1
+    elif args.dataset_file == "coco_panoptic":
+        # for panoptic, we just add a num_classes that is large enough to hold
+        # max_obj_id + 1, but the exact value doesn't really matter
+        num_classes = 250
+    else:
+        num_classes = 91
+    print('num_classes', num_classes)
+    device = torch.device(args.device)
+
+    # import pdb;pdb.set_trace()
+    model = SViTDetector(
+        num_classes=num_classes, #类别数91
+        pre_trained=args.pre_trained, #pre_train模型pth文件
+        det_token_num=args.det_token_num, #100个det token
+        backbone_name=args.backbone_name, #vit backbone的型号
+        init_pe_size=args.init_pe_size, #初始化position embedding大小
+        mid_pe_size=args.mid_pe_size, #mid position embedding 大小
+        use_checkpoint=args.use_checkpoint, #是否使用checkpoint
+        # pruning_loc=args.pruning_loc, #剪枝位置
+        # keep_rate=args.keep_rate #剪枝保留率
+    )
+    matcher = build_matcher(args)
+    weight_dict = {'loss_ce': 1, 'loss_bbox': args.bbox_loss_coef,'loss_ratio': 4}
+    weight_dict['loss_giou'] = args.giou_loss_coef
+    # TODO this is a hack
+    # if args.aux_loss:
+    #     aux_weight_dict = {}
+    #     for i in range(args.dec_layers - 1):
+    #         aux_weight_dict.update({k + f'_{i}': v for k, v in weight_dict.items()})
+    #     weight_dict.update(aux_weight_dict)
+
+    losses = ['labels', 'boxes', 'cardinality', 'ratio']
+    criterion = SetDynamicCriterion(num_classes, matcher=matcher, weight_dict=weight_dict,
+                             eos_coef=args.eos_coef, losses=losses,\
+                             keep_ratio=[0.7,0.7,0.7,0.49,0.49,0.49,0.343,0.343,0.343])
     criterion.to(device)
     postprocessors = {'bbox': PostProcess()}
 
