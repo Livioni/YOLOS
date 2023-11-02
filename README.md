@@ -18,6 +18,7 @@
 - 2023.11.2-1 更新了DynamicYOLOS Tiny的训练结果，以[0.9,0.9^2,0.9^3]为参数训练的Dynamic ViT，冻结的Backboe, 仅训练head 和 predictor, epoch=200, AP丢失0.031=3.1%
 - 2023.11.2-1.1 update readme
 - 2023.11.2-1.2 格式化readme
+- 2023.11.2-1.3 readme插入图片
 
 ## Weights
 1. results/DynamicYOLOS_tiny/DynamicYOLOS199_tiny.pth 以[0.9,0.9^2,0.9^3]为参数训练的Dynamic ViT，冻结的Backboe, 仅训练head 和 predictor, epoch=200。
@@ -170,7 +171,7 @@ Reuse Proportion:  0.8203114300504226
 | **80%**                 | 0.431             | 0.427             | 0.423             | 0.421             |
 | **100%**                | 0.430             | 0.426             | 0.419             | 0.415             |
 
-
+![Data Visualization](visualization/figures/drop_AP.png)
 
 ### Token Drop
 <details>
