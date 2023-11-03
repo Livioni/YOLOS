@@ -758,7 +758,7 @@ class SViT(VisionTransformer):
                     score = pred_score[:,:,0]
                     num_keep_node = int(init_n * self.token_ratio[p_count])
                     keep_policy = torch.argsort(score, dim=1, descending=True)[:, :num_keep_node]
-                    cls_policy = torch.ones(B, 1, dtype=keep_policy.dtype, device=keep_policy.device)
+                    cls_policy = torch.zeros(B, 1, dtype=keep_policy.dtype, device=keep_policy.device)
                     keep_det = torch.arange(start=x.shape[1]-self.det_token_num, end=x.shape[1], dtype=keep_policy.dtype, device=keep_policy.device)
                     det_policy = keep_det.unsqueeze(0).expand(B, -1)
                     now_policy = torch.cat([cls_policy, keep_policy + 1, det_policy], dim=1)
