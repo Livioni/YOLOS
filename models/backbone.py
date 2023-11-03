@@ -766,23 +766,17 @@ class SViT(VisionTransformer):
                     # 对选中的token应用blk
                     processed_x = blk(selected_x)
                     # 创建一个新的tensor，大小与原始x相同，用于存放最终结果
-                    final_x = torch.empty_like(x)
+                    final_x = torch.zeros_like(x)
                     # 将经过处理的token插入到最终结果中
                     # 创建一个布尔掩码，用于确定now_policy中的位置
                     mask = torch.zeros_like(x, dtype=torch.bool)
                     mask.scatter_(1, now_policy.unsqueeze(-1).expand(-1, -1, x.size(-1)), 1)
                     # 将未经处理的token放入final_x
                     final_x[~mask] = x[~mask]
-                    # 将经过处理的token放入final_x
-                    # 需要保留mask中True的索引
-                    mask_indices = mask.nonzero(as_tuple=True)
-                    # 创建一个序列，包含0到B-1的数字，用于索引批次
-                    batch_indices = torch.arange(B, device=x.device)
                     # 为每个批次应用对应的now_policy中的indices
                     for i in range(B):
-                        batch_mask = batch_indices == i
                         selected_indices = now_policy[i]
-                        final_x[batch_mask, selected_indices] = processed_x[i]
+                        final_x[i, selected_indices] = processed_x[i]
                     x = final_x
                 p_count += 1
             else:
